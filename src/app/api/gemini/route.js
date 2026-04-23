@@ -1,0 +1,232 @@
+import { NextResponse } from 'next/server'
+import { createServerClient } from '@supabase/ssr'
+import { cookies } from 'next/headers'
+import { MONTHS_NAMES, CARD_META } from '@/lib/constants' // Make sure constants are correctly exported
+
+const GEMINI_MODELS = [
+  { id: 'gemini-3.1-flash-lite-preview', label: 'Gemini 3.1 Flash Lite' },
+  { id: 'gemini-2.5-flash',              label: 'Gemini 2.5 Flash' },
+  { id: 'gemini-3-flash-preview',        label: 'Gemini 3.0 Flash Preview' },
+  { id: 'gemini-2.0-flash',              label: 'Gemini 2.0 Flash' },
+  { id: 'gemini-flash-latest',           label: 'Gemini Flash Latest' },
+]
+
+export async function POST(req) {
+  try {
+    const cookieStore = await cookies()
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      { cookies: { getAll: () => cookieStore.getAll() } }
+    )
+    
+    // 1. Auth Validation
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      return NextResponse.json({ error: 'Faça login para usar a IA.' }, { status: 401 })
+    }
+
+    const body = await req.json()
+    const { userText } = body
+
+    if (!userText || userText.trim().length < 3) {
+      return NextResponse.json({ error: 'Texto muito curto.' }, { status: 400 })
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY
+    if (!apiKey) {
+      return NextResponse.json({ error: 'GEMINI_API_KEY não configurada no servidor.' }, { status: 500 })
+    }
+
+    // 2. Fetch User Data
+    const { data: expenses } = await supabase.from('expenses').select('*').eq('user_id', user.id)
+    const { data: extraIncome } = await supabase.from('extra_income').select('*').eq('user_id', user.id)
+
+    // Build Context
+    const dataContext = `
+DADOS ATUAIS DA CONTA DO USUÁRIO:
+---
+RECEITAS:
+${extraIncome && extraIncome.length > 0 ? extraIncome.map(i => `- ID: [${i.id}] | Descrição: ${i.description} | R$${i.amount} | Mês Início: ${i.start_month} (${MONTHS_NAMES[i.start_month]}) | Duração: ${i.total_months} meses`).join('\n') : "Nenhuma receita cadastrada."}
+---
+DESPESAS:
+${expenses && expenses.length > 0 ? expenses.map(e => `- ID: [${e.id}] | Descrição: ${e.description} | Cartão: ${e.card} | R$${e.amount} | Mês Início: ${e.start_month} (${MONTHS_NAMES[e.start_month]}) | Parcelas: ${e.total_installments} | Vencimento: Dia ${e.pay_day || 5} | Taxa/Juros: ${e.is_fee}`).join('\n') : "Nenhuma despesa cadastrada."}
+---
+MESES DE REFERÊNCIA (Índices válidos):
+0=Abril, 1=Maio, 2=Junho, 3=Julho, 4=Agosto, 5=Setembro, 6=Outubro, 7=Novembro, 8=Dezembro
+Atual Mês Corrente (se não especificado): Abril (0)
+`;
+
+    const SYSTEM_PROMPT = `Você é um Agente Financeiro Avançado (FinDash AI). Você tem liberdade quase total para ler, organizar, excluir, adicionar e analisar a conta do usuário.
+
+SEU OBJETIVO:
+Interagir com o usuário fornecendo relatórios, calculando juros, comparando gastos e realizando ações de banco de dados conforme solicitado.
+
+VOGAL DE COMUNICAÇÃO:
+Você deve SEMPRE retornar EXATAMENTE UM JSON ARRAY. Nunca markdown brutão, apenas o JSON.
+O Array conterá as AÇÕES que nosso sistema tomará. Por exemplo, sempre envie uma ação de "mensagem" para responder ao usuário, e se necessário, "inserir_despesa", "apagar_despesa", etc.
+
+FORMATO ESTRITO DO JSON:
+[
+  {
+    "acao": "mensagem",
+    "texto": "Sua resposta analítica aqui. Pode usar markdown (ex: **negrito**, listas)."
+  },
+  {
+    "acao": "inserir_despesa",
+    "descricao": "Fatura X",
+    "valor": 150.50,
+    "cartao": "nubank",
+    "parcelas": 1,
+    "mes_inicio_idx": 1,
+    "dia_vencimento": 5,
+    "is_fee": false
+  },
+  {
+    "acao": "inserir_receita",
+    "descricao": "Salário",
+    "valor": 2000,
+    "mes_inicio_idx": 0,
+    "meses_recorrente": 8,
+    "dia_pagamento": 5
+  },
+  {
+    "acao": "apagar_despesa",
+    "id": "uuid-da-despesa-que-o-usuario-pediu-para-apagar"
+  },
+  {
+    "acao": "apagar_receita",
+    "id": "uuid-da-receita-que-o-usuario-pediu-para-apagar"
+  }
+]
+
+REGRAS:
+1. Retorne APENAS a string formatada em JSON ARRAY puro.
+2. Seja inteligente: Se o usuário pedir um cálculo de juros caso ele atrase, explique na "mensagem", e SE ele pedir para adicionar, crie a ação "inserir_despesa" com is_fee: true.
+3. Use os índices descritos (0 a 8) para mes_inicio_idx.
+4. "meses_recorrente" deve ser no mínimo 1. Para meses seguintes use o suficiente (ex: maio a dezembro = 8 meses).
+5. Certifique as opções de cartões permitidas: "nubank", "will", "havan", "amazon", "mercadopago", "fixa", "extra".
+
+DADOS DE CONTEXTO ESTÃO ANEXADOS AO COMANDO DO USUÁRIO.`;
+
+    let lastError = null
+    let responseText = null
+    let modelUsed = ''
+    let failedModels = []
+
+    for (const model of GEMINI_MODELS) {
+      try {
+        responseText = await callModel(userText.trim(), apiKey, model.id, SYSTEM_PROMPT, dataContext)
+        modelUsed = model.label
+        break // Sucesso
+      } catch (err) {
+        lastError = err
+        failedModels.push({ model: model.label, error: err.message })
+        console.warn(`[FinDash AI] ${model.label} falhou: ${err.message}`)
+      }
+    }
+
+    if (!responseText) {
+      const errorDetails = failedModels.map(f => `${f.model}: ${f.error}`).join(' | ')
+      throw new Error(`Infelizmente nenhum modelo aceitou o comando. (Detalhes: ${errorDetails})`)
+    }
+
+    // Limpar markdown da resposta
+    const cleanOutput = responseText.replace(/```json/gi, '').replace(/```/g, '').trim()
+    let actions = []
+    
+    try {
+      actions = JSON.parse(cleanOutput)
+      if (!Array.isArray(actions)) actions = [actions]
+    } catch (e) {
+      throw new Error('O comando foi recusado ou não foi entendido perfeitamente pela IA. Tente reescrever de forma mais direta.')
+    }
+
+    // 3. Execução das Ações de Forma Segura Localizada (apenas para este User ID)
+    const exec_results = []
+    let aiMessage = ''
+
+    for (const act of actions) {
+      if (act.acao === 'mensagem') {
+        aiMessage += act.texto + '\n\n'
+      }
+      else if (act.acao === 'inserir_despesa') {
+        const payload = {
+          user_id: user.id,
+          description: act.descricao || 'Despesa',
+          amount: parseFloat(act.valor),
+          start_month: act.mes_inicio_idx || 0,
+          total_installments: act.parcelas || 1,
+          card: act.cartao || 'extra',
+          pay_day: parseInt(act.dia_vencimento) || 5,
+          is_fee: !!act.is_fee,
+          source: 'ai'
+        }
+        await supabase.from('expenses').insert(payload)
+      }
+      else if (act.acao === 'inserir_receita') {
+        const payload = {
+          user_id: user.id,
+          description: act.descricao || 'Receita',
+          amount: parseFloat(act.valor),
+          start_month: act.mes_inicio_idx || 0,
+          total_months: act.meses_recorrente || 1,
+          pay_day: act.dia_pagamento || 5,
+          source: 'ai'
+        }
+        await supabase.from('extra_income').insert(payload)
+      }
+      else if (act.acao === 'apagar_despesa' && act.id) {
+        await supabase.from('expenses').delete().eq('id', act.id).eq('user_id', user.id)
+      }
+      else if (act.acao === 'apagar_receita' && act.id) {
+        await supabase.from('extra_income').delete().eq('id', act.id).eq('user_id', user.id)
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      modelUsed,
+      message: aiMessage.trim(),
+    })
+
+  } catch (error) {
+    console.error('[FinDash AI Error]', error)
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+}
+
+async function callModel(userText, apiKey, modelId, systemPrompt, dataContext) {
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`
+
+  const fullUserMessage = `${dataContext}\n\nCOMANDO DO USUÁRIO:\n${userText}`
+
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: {
+        parts: [{ text: systemPrompt }]
+      },
+      contents: [{
+        role: 'user',
+        parts: [{ text: fullUserMessage }],
+      }],
+      generationConfig: {
+        temperature: 0.1, // Para maior resiliência em JSON puro
+        maxOutputTokens: 4000,
+      },
+    }),
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err?.error?.message || `HTTP ${res.status}`)
+  }
+
+  const data = await res.json()
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+  if (!text) throw new Error('Resposta vazia da API do Gemini')
+  
+  return text
+}
