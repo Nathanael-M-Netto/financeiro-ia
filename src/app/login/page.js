@@ -18,6 +18,23 @@ export default function LoginPage() {
 
   const sanitize = (str) => str.trim().replace(/[<>]/g, '')
 
+  const handleForgotPassword = async () => {
+    const cleanEmail = sanitize(email)
+    if (!cleanEmail) {
+      setError('Digite seu e-mail acima para recuperar a senha.')
+      return
+    }
+    setLoading(true)
+    setError(null)
+    setSuccess(null)
+    const { error: err } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+      redirectTo: `${window.location.origin}/auth/callback?next=/auth/reset`,
+    })
+    if (err) setError(err.message)
+    else setSuccess(`Enviamos um link de recuperação para ${cleanEmail}. Confira seu e-mail.`)
+    setLoading(false)
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
 
@@ -157,6 +174,12 @@ export default function LoginPage() {
               maxLength={72}
             />
           </div>
+
+          {isLoginMode && (
+            <button type="button" className="login-forgot" onClick={handleForgotPassword} disabled={loading}>
+              Esqueci minha senha
+            </button>
+          )}
 
           {error && (
             <div className="login-error">

@@ -9,11 +9,21 @@ import {
   IconLogout, IconMenu, IconClose,
 } from '@/lib/icons'
 
-const NAV = [
-  { href: '/dashboard', label: 'Visão geral', Icon: IconDashboard },
-  { href: '/lancamentos', label: 'Lançamentos', Icon: IconReceipt },
-  { href: '/cards', label: 'Cartões', Icon: IconCard },
-  { href: '/chat', label: 'Assistente IA', Icon: IconSparkles },
+const NAV_SECTIONS = [
+  {
+    label: 'Geral',
+    items: [
+      { href: '/dashboard', label: 'Visão geral', Icon: IconDashboard },
+      { href: '/lancamentos', label: 'Lançamentos', Icon: IconReceipt },
+      { href: '/cards', label: 'Cartões', Icon: IconCard },
+    ],
+  },
+  {
+    label: 'Assistente',
+    items: [
+      { href: '/chat', label: 'Assistente IA', Icon: IconSparkles },
+    ],
+  },
 ]
 
 export default function Sidebar({ userName, userEmail }) {
@@ -32,7 +42,13 @@ export default function Sidebar({ userName, userEmail }) {
 
   return (
     <>
-      <button className="app-menu-btn" onClick={() => setOpen(true)} aria-label="Abrir menu"><IconMenu /></button>
+      <header className="app-mobilebar">
+        <button className="app-mobilebar-btn" onClick={() => setOpen(true)} aria-label="Abrir menu"><IconMenu size={20} /></button>
+        <div className="app-mobilebar-brand">
+          <span className="app-mobilebar-mark"><IconBrand size={15} /></span>
+          FinDash
+        </div>
+      </header>
       <div className={`app-overlay ${open ? 'show' : ''}`} onClick={() => setOpen(false)} />
 
       <aside className={`app-sidebar ${open ? 'open' : ''}`}>
@@ -46,16 +62,20 @@ export default function Sidebar({ userName, userEmail }) {
         </div>
 
         <nav className="app-nav">
-          <span className="app-nav-label">Menu</span>
-          {NAV.map(({ href, label, Icon }) => {
-            const active = pathname === href || pathname.startsWith(href + '/')
-            return (
-              <Link key={href} href={href} className={`app-nav-item ${active ? 'active' : ''}`} onClick={() => setOpen(false)}>
-                <Icon size={18} />
-                <span>{label}</span>
-              </Link>
-            )
-          })}
+          {NAV_SECTIONS.map((sec) => (
+            <div key={sec.label} className="app-nav-group">
+              <span className="app-nav-label">{sec.label}</span>
+              {sec.items.map(({ href, label, Icon }) => {
+                const active = pathname === href || pathname.startsWith(href + '/')
+                return (
+                  <Link key={href} href={href} className={`app-nav-item ${active ? 'active' : ''}`} onClick={() => setOpen(false)}>
+                    <Icon size={18} />
+                    <span>{label}</span>
+                  </Link>
+                )
+              })}
+            </div>
+          ))}
         </nav>
 
         <div className="app-sidebar-footer">

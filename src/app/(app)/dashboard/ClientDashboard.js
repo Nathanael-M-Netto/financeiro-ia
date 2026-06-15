@@ -1,25 +1,53 @@
 'use client'
 
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { computeAll, formatCurrency, monthIdxForDate } from '@/lib/finance-engine'
 import { CARD_META } from '@/lib/constants'
 import { IconChevronLeft, IconChevronRight, IconAlert, IconCheck } from '@/lib/icons'
 
 export default function ClientDashboard({ initialExpenses, initialIncome }) {
-  // Abre direto no mês atual real (ex.: hoje é Junho → índice 2).
-  const [currentMonth, setCurrentMonth] = useState(() => monthIdxForDate())
+  // A data real só é lida no cliente, após montar — assim o HTML do servidor e o
+  // primeiro render do cliente são idênticos (sem divergência de hidratação).
+  const [today, setToday] = useState(null)
+  const [currentMonth, setCurrentMonth] = useState(0)
+
+  useEffect(() => {
+    const t = new Date()
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setToday(t)
+    setCurrentMonth(monthIdxForDate(t))
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [])
 
   const metrics = useMemo(
-    () => computeAll(initialExpenses, initialIncome, new Date()),
-    [initialExpenses, initialIncome]
+    () => computeAll(initialExpenses, initialIncome, today),
+    [initialExpenses, initialIncome, today]
   )
   const currentMetric = metrics[currentMonth]
-  const todayDay = new Date().getDate()
+  const todayDay = today ? today.getDate() : null
   const lastBalance = metrics[metrics.length - 1].balance
   const negativeMonths = metrics.filter(m => m.balance < 0).length
   const hasData = initialExpenses.length > 0 || initialIncome.length > 0
 
   const alertIcon = (type) => (type === 'pos' ? <IconCheck size={16} /> : <IconAlert size={16} />)
+
+  // Escala do gráfico de tendência (maior saldo absoluto entre os 9 meses).
+  const trendMaxAbs = useMemo(
+    () => Math.max(1, ...metrics.map(m => Math.abs(m.balance))),
+    [metrics]
+  )
+
+  // Gastos agrupados por cartão no mês selecionado.
+  const byCard = useMemo(() => {
+    const map = {}
+    currentMetric.expensesList.forEach(e => {
+      if (!map[e.cardName]) map[e.cardName] = { name: e.cardName, cardId: e.cardId, total: 0 }
+      map[e.cardName].total += e.amount
+    })
+    const arr = Object.values(map).sort((a, b) => b.total - a.total)
+    const total = arr.reduce((s, c) => s + c.total, 0)
+    return { arr, total }
+  }, [currentMetric])
 
   return (
     <div className="page anim">
@@ -79,6 +107,56 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
           <div className="kpi-sub">cartões ou itens no mês</div>
         </div>
       </section>
+
+      {hasData && (
+        <section className="dash-grid">
+          <div className="card chart-card">
+            <div className="card-body">
+              <div className="timeline-title">Tendência do saldo — Abril a Dezembro</div>
+              <div className="trend-chart">
+                {metrics.map((m, i) => {
+                  const v = m.balance
+                  const h = Math.round((Math.abs(v) / trendMaxAbs) * 100)
+                  const pos = v >= 0
+                  return (
+                    <button key={i} className={`trend-col ${currentMonth === i ? 'active' : ''}`} onClick={() => setCurrentMonth(i)} title={`${m.monthName}: ${formatCurrency(v)}`}>
+                      <div className="trend-top"><div className="trend-bar pos" style={{ height: pos ? `${h}%` : '0%' }} /></div>
+                      <div className="trend-mid" />
+                      <div className="trend-bot"><div className="trend-bar neg" style={{ height: !pos ? `${h}%` : '0%' }} /></div>
+                      <span className="trend-lbl">{m.monthName.slice(0, 3)}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className="card chart-card">
+            <div className="card-body">
+              <div className="timeline-title">Gastos por cartão — {currentMetric.monthName}</div>
+              {byCard.arr.length === 0 ? (
+                <div className="chart-empty">Nenhuma despesa neste mês.</div>
+              ) : (
+                <div className="bycard-list">
+                  {byCard.arr.map((c, i) => {
+                    const color = CARD_META[c.cardId]?.cssVar || '#4d83ff'
+                    const pctTotal = byCard.total > 0 ? (c.total / byCard.total) * 100 : 0
+                    return (
+                      <div key={i} className="bycard-row">
+                        <div className="bycard-head">
+                          <span className="bycard-name">{c.name}</span>
+                          <span className="bycard-val">{formatCurrency(c.total)} · {pctTotal.toFixed(0)}%</span>
+                        </div>
+                        <div className="bycard-bar"><div className="bycard-fill" style={{ width: `${pctTotal}%`, background: color }} /></div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="timeline-card">
         <div className="timeline-head">

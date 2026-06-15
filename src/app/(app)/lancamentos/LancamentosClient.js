@@ -6,7 +6,16 @@ import { createClient } from '@/lib/supabase-browser'
 import { formatCurrency } from '@/lib/finance-engine'
 import { MONTHS_NAMES } from '@/lib/constants'
 import { cardChipStyle } from '@/lib/cards'
-import { IconPlus, IconPencil, IconTrash } from '@/lib/icons'
+import { IconPlus, IconPencil, IconTrash, IconClose } from '@/lib/icons'
+
+function DetailRow({ label, value, mono }) {
+  return (
+    <div className="detail-row">
+      <span className="detail-row-label">{label}</span>
+      <span className={`detail-row-value ${mono ? 'mono' : ''}`}>{value}</span>
+    </div>
+  )
+}
 
 const EMPTY = {
   description: '', amount: '', card_id: '',
@@ -26,6 +35,7 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
   const [form, setForm] = useState(EMPTY)
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [confirmClearAll, setConfirmClearAll] = useState(false)
+  const [selected, setSelected] = useState(null)
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' })
 
@@ -137,6 +147,7 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
       const { error } = await supabase.from(table).delete().eq('id', confirmDelete.id).eq('user_id', userId)
       if (error) throw error
       setConfirmDelete(null)
+      setSelected(null)
       await reload()
       showToast('Lançamento excluído.')
     } catch (e) {
@@ -167,6 +178,12 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
 
   const monthName = (idx) => MONTHS_NAMES[idx] || '—'
 
+  const selectedItem = selected
+    ? (selected.kind === 'despesa'
+        ? expenses.find(e => e.id === selected.id)
+        : incomes.find(i => i.id === selected.id))
+    : null
+
   return (
     <div className="cards-page">
       <header className="app-topbar">
@@ -174,92 +191,134 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
           <h1 className="page-title">Lançamentos</h1>
           <p className="page-sub">Adicione, edite ou exclua despesas e receitas manualmente.</p>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button className="btn-primary" onClick={() => openAdd('despesa')}><IconPlus size={16} /> Despesa</button>
-          <button className="btn-ghost" onClick={() => openAdd('receita')}><IconPlus size={16} /> Receita</button>
+        <div className="lanc-add-actions">
+          <button className="btn-soft-neg" onClick={() => openAdd('despesa')}><IconPlus size={16} /> Nova despesa</button>
+          <button className="btn-soft-pos" onClick={() => openAdd('receita')}><IconPlus size={16} /> Nova receita</button>
         </div>
       </header>
 
-      {/* DESPESAS */}
-      <section className="card" style={{ marginBottom: '22px' }}>
-        <div className="card-header">
-          <span className="timeline-title" style={{ marginBottom: 0 }}>Despesas</span>
-        </div>
-        <div className="card-body">
-          {expenses.length === 0 ? (
-            <div style={{ textAlign: 'center', color: 'var(--text2)', fontSize: '.82rem', padding: '14px 0' }}>Nenhuma despesa. Clique em “+ Despesa”.</div>
-          ) : (
-            <table className="exp-table">
-              <thead>
-                <tr>
-                  <th>Descrição</th>
-                  <th>Cartão</th>
-                  <th>Início</th>
-                  <th className="align-center" style={{ textAlign: 'center' }}>Parcelas</th>
-                  <th className="align-right">Valor</th>
-                  <th className="align-right">Ações</th>
-                </tr>
-              </thead>
-              <tbody>
-                {expenses.map((e) => {
-                  const c = cardFor(e)
-                  return (
-                    <tr key={e.id}>
-                      <td>{e.is_fee ? '⚠ ' : ''}{e.description || 'Despesa'}</td>
-                      <td>{c ? <span className="tag" style={cardChipStyle(c.color)}>{c.name}</span> : (e.card || '—')}</td>
-                      <td>{monthName(e.start_month)}</td>
-                      <td style={{ textAlign: 'center' }}><span className="inst-badge">{e.is_fee ? '—' : `${e.total_installments}x`}</span></td>
-                      <td className="amt-col">{formatCurrency(parseFloat(e.amount) || 0)}</td>
-                      <td className="amt-col" style={{ whiteSpace: 'nowrap' }}>
-                        <button className="icon-btn" onClick={() => openEditExpense(e)} aria-label="Editar"><IconPencil size={14} /></button>{' '}
-                        <button className="icon-btn danger" onClick={() => setConfirmDelete({ kind: 'despesa', id: e.id, label: e.description || 'Despesa' })} aria-label="Excluir"><IconTrash size={14} /></button>
-                      </td>
+      <div className="lanc-layout">
+        <div className="lanc-main">
+          {/* DESPESAS */}
+          <section className="card" style={{ marginBottom: '18px' }}>
+            <div className="card-header">
+              <span className="timeline-title" style={{ marginBottom: 0 }}>Despesas</span>
+              <span className="lanc-count">{expenses.length}</span>
+            </div>
+            <div className="card-body" style={{ padding: 0 }}>
+              {expenses.length === 0 ? (
+                <div className="lanc-empty">Nenhuma despesa. Clique em “Nova despesa”.</div>
+              ) : (
+                <table className="exp-table exp-table-rows">
+                  <thead>
+                    <tr>
+                      <th>Descrição</th>
+                      <th>Cartão</th>
+                      <th>Início</th>
+                      <th className="align-center" style={{ textAlign: 'center' }}>Parc.</th>
+                      <th className="align-right">Valor</th>
                     </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </section>
+                  </thead>
+                  <tbody>
+                    {expenses.map((e) => {
+                      const c = cardFor(e)
+                      const sel = selected?.kind === 'despesa' && selected.id === e.id
+                      return (
+                        <tr key={e.id} className={`row-click ${sel ? 'row-selected' : ''}`} onClick={() => setSelected({ kind: 'despesa', id: e.id })}>
+                          <td>{e.is_fee ? '⚠ ' : ''}{e.description || 'Despesa'}</td>
+                          <td>{c ? <span className="tag" style={cardChipStyle(c.color)}>{c.name}</span> : (e.card || '—')}</td>
+                          <td>{monthName(e.start_month)}</td>
+                          <td style={{ textAlign: 'center' }}><span className="inst-badge">{e.is_fee ? '—' : `${e.total_installments}x`}</span></td>
+                          <td className="amt-col">{formatCurrency(parseFloat(e.amount) || 0)}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </section>
 
-      {/* RECEITAS */}
-      <section className="card">
-        <div className="card-header">
-          <span className="timeline-title" style={{ marginBottom: 0 }}>Receitas</span>
+          {/* RECEITAS */}
+          <section className="card">
+            <div className="card-header">
+              <span className="timeline-title" style={{ marginBottom: 0 }}>Receitas</span>
+              <span className="lanc-count">{incomes.length}</span>
+            </div>
+            <div className="card-body" style={{ padding: 0 }}>
+              {incomes.length === 0 ? (
+                <div className="lanc-empty">Nenhuma receita. Clique em “Nova receita”.</div>
+              ) : (
+                <table className="exp-table exp-table-rows">
+                  <thead>
+                    <tr>
+                      <th>Descrição</th>
+                      <th>Início</th>
+                      <th className="align-center" style={{ textAlign: 'center' }}>Duração</th>
+                      <th className="align-right">Valor</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {incomes.map((i) => {
+                      const sel = selected?.kind === 'receita' && selected.id === i.id
+                      return (
+                        <tr key={i.id} className={`row-click ${sel ? 'row-selected' : ''}`} onClick={() => setSelected({ kind: 'receita', id: i.id })}>
+                          <td>{i.description || 'Receita'}</td>
+                          <td>{monthName(i.start_month)}</td>
+                          <td style={{ textAlign: 'center' }}><span className="inst-badge">{i.total_months || 1} m</span></td>
+                          <td className="amt-col pos">{formatCurrency(parseFloat(i.amount) || 0)}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </section>
         </div>
-        <div className="card-body">
-          {incomes.length === 0 ? (
-            <div style={{ textAlign: 'center', color: 'var(--text2)', fontSize: '.82rem', padding: '14px 0' }}>Nenhuma receita. Clique em “+ Receita”.</div>
+
+        {/* PAINEL DE DETALHES (estilo Supabase) */}
+        <aside className={`detail-panel ${selectedItem ? 'open' : ''}`}>
+          {!selectedItem ? (
+            <div className="detail-empty">Selecione um lançamento na tabela para ver os detalhes.</div>
           ) : (
-            <table className="exp-table">
-              <thead>
-                <tr>
-                  <th>Descrição</th>
-                  <th>Início</th>
-                  <th className="align-center" style={{ textAlign: 'center' }}>Duração</th>
-                  <th className="align-right">Valor</th>
-                  <th className="align-right">Ações</th>
-                </tr>
-              </thead>
-              <tbody>
-                {incomes.map((i) => (
-                  <tr key={i.id}>
-                    <td>{i.description || 'Receita'}</td>
-                    <td>{monthName(i.start_month)}</td>
-                    <td style={{ textAlign: 'center' }}><span className="inst-badge">{i.total_months || 1}{(i.total_months || 1) > 1 ? ' meses' : ' mês'}</span></td>
-                    <td className="amt-col pos">{formatCurrency(parseFloat(i.amount) || 0)}</td>
-                    <td className="amt-col" style={{ whiteSpace: 'nowrap' }}>
-                      <button className="icon-btn" onClick={() => openEditIncome(i)} aria-label="Editar"><IconPencil size={14} /></button>{' '}
-                      <button className="icon-btn danger" onClick={() => setConfirmDelete({ kind: 'receita', id: i.id, label: i.description || 'Receita' })} aria-label="Excluir"><IconTrash size={14} /></button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <>
+              <div className="detail-head">
+                <div>
+                  <div className="detail-kind">{selected.kind === 'despesa' ? 'Despesa' : 'Receita'}</div>
+                  <div className="detail-title">{selectedItem.description || (selected.kind === 'despesa' ? 'Despesa' : 'Receita')}</div>
+                </div>
+                <button className="detail-close" onClick={() => setSelected(null)} aria-label="Fechar"><IconClose size={16} /></button>
+              </div>
+              <div className="detail-amount" style={{ color: selected.kind === 'despesa' ? 'var(--neg)' : 'var(--pos)' }}>
+                {selected.kind === 'despesa' ? '-' : '+'}{formatCurrency(parseFloat(selectedItem.amount) || 0)}
+              </div>
+              <div className="detail-rows">
+                {selected.kind === 'despesa' ? (
+                  <>
+                    <DetailRow label="Cartão" value={cardFor(selectedItem)?.name || selectedItem.card || '—'} />
+                    <DetailRow label="Mês de início" value={monthName(selectedItem.start_month)} />
+                    <DetailRow label="Parcelas" value={selectedItem.is_fee ? '—' : `${selectedItem.total_installments}x`} mono />
+                    <DetailRow label="Vencimento" value={selectedItem.pay_day ? `dia ${selectedItem.pay_day}` : '—'} mono />
+                    <DetailRow label="Juros/multa" value={selectedItem.is_fee ? 'Sim' : 'Não'} />
+                  </>
+                ) : (
+                  <>
+                    <DetailRow label="Mês de início" value={monthName(selectedItem.start_month)} />
+                    <DetailRow label="Duração" value={`${selectedItem.total_months || 1} ${(selectedItem.total_months || 1) > 1 ? 'meses' : 'mês'}`} />
+                    <DetailRow label="Pagamento" value={selectedItem.pay_day ? `dia ${selectedItem.pay_day}` : '—'} mono />
+                  </>
+                )}
+                <DetailRow label="Origem" value={selectedItem.source === 'ai' ? 'IA' : 'Manual'} />
+              </div>
+              <div className="detail-actions">
+                <button className="btn-ghost" onClick={() => selected.kind === 'despesa' ? openEditExpense(selectedItem) : openEditIncome(selectedItem)}><IconPencil size={14} /> Editar</button>
+                <button className="btn-soft-neg" onClick={() => setConfirmDelete({ kind: selected.kind, id: selectedItem.id, label: selectedItem.description || 'Lançamento' })}><IconTrash size={14} /> Excluir</button>
+              </div>
+            </>
           )}
-        </div>
-      </section>
+        </aside>
+      </div>
 
       {/* Zona de perigo */}
       {(expenses.length > 0 || incomes.length > 0) && (
