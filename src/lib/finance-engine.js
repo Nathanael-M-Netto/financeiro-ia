@@ -1,11 +1,50 @@
-import { MONTHS_NAMES, CARD_META } from './constants'
+import { MONTHS_NAMES, CARD_META, BASE_YEAR, BASE_MONTH } from './constants'
 
 /**
  * Motor financeiro genérico.
  * Recebe despesas e receitas do Supabase e projeta os 9 meses (Abril-Dezembro).
- * Todos os dados vêm do banco — nada hardcoded.
+ * Quando `today` é informado, calcula a posição de cada evento em relação a hoje
+ * (vencido / vence hoje / a vencer) e estima encargos de atraso.
  */
-export function computeAll(expenses = [], extraIncome = []) {
+
+// Índice do mês (0 = Abril … 8 = Dezembro) para uma data real.
+export function monthIdxForDate(date = new Date()) {
+  const y = date.getFullYear()
+  if (y < BASE_YEAR) return 0
+  if (y > BASE_YEAR) return 8
+  return Math.max(0, Math.min(8, date.getMonth() - BASE_MONTH))
+}
+
+// Data real (00:00) de um evento no mês `monthIdx`, dia `day`.
+export function dateForMonthDay(monthIdx, day) {
+  return new Date(BASE_YEAR, BASE_MONTH + monthIdx, day || 1)
+}
+
+function startOfDay(d) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate())
+}
+
+/**
+ * Estima encargos de atraso (padrão brasileiro): multa de 2% + juros de mora
+ * de 1% ao mês (proporcional aos dias). Retorna multa, juros e total.
+ */
+export function computeLateCharge(amount, daysLate) {
+  const a = parseFloat(amount) || 0
+  if (!daysLate || daysLate <= 0) return { fine: 0, interest: 0, charge: 0, total: a, daysLate: 0 }
+  const fine = a * 0.02
+  const interest = a * 0.01 * (daysLate / 30)
+  const charge = fine + interest
+  return { fine, interest, charge, total: a + charge, daysLate }
+}
+
+export function computeAll(expenses = [], extraIncome = [], today = null) {
+  const hasToday = today instanceof Date && !isNaN(today)
+  const todayMid = hasToday ? startOfDay(today) : null
+  const inRange = hasToday &&
+    today.getFullYear() === BASE_YEAR &&
+    today.getMonth() >= BASE_MONTH && today.getMonth() <= BASE_MONTH + 8
+  const currentMonthIdx = inRange ? monthIdxForDate(today) : -1
+
   let carryover = 0
   const metrics = []
 
@@ -68,11 +107,29 @@ export function computeAll(expenses = [], extraIncome = []) {
     // Alertas dinâmicos
     const alerts = buildAlerts(incomeThisMonth, activeExpenses, balance, carryover, m)
 
-    const timelineEvents = buildTimelineEvents(incomeThisMonth, activeExpenses)
+    const ctx = { monthIdx: m, todayMid, currentMonthIdx, inRange }
+    const timelineEvents = buildTimelineEvents(incomeThisMonth, activeExpenses, ctx)
+
+    // Resumo de pagamentos do mês (a partir do status dos eventos)
+    let pendingPay = 0, passedPay = 0, overdueAmount = 0, overdueCharge = 0
+    timelineEvents.forEach(ev => {
+      if (ev.type === 'expense' || ev.type === 'late') {
+        if (ev.status === 'past') {
+          passedPay += ev.amount
+          if (m === currentMonthIdx) {
+            overdueAmount += ev.amount
+            overdueCharge += ev.lateEstimate || 0
+          }
+        } else {
+          pendingPay += ev.amount
+        }
+      }
+    })
 
     metrics.push({
       idx: m,
       monthName,
+      isCurrent: m === currentMonthIdx,
       totalIn: totalIncome,
       totalOut,
       balance,
@@ -81,7 +138,11 @@ export function computeAll(expenses = [], extraIncome = []) {
       expensesList: activeExpenses,
       lateFees,
       alerts,
-      timelineEvents
+      timelineEvents,
+      pendingPay,
+      passedPay,
+      overdueAmount,
+      overdueCharge,
     })
 
     carryover = balance
@@ -142,19 +203,30 @@ function buildAlerts(income, expenses, balance, prevCarry, monthIdx) {
   return alerts
 }
 
-function buildTimelineEvents(incomeList, activeExpenses) {
+// Posição de um evento em relação a hoje.
+function eventStatus(ctx, day) {
+  if (!ctx.inRange || ctx.currentMonthIdx < 0) return 'future'
+  if (ctx.monthIdx < ctx.currentMonthIdx) return 'past'
+  if (ctx.monthIdx > ctx.currentMonthIdx) return 'future'
+  const evDate = dateForMonthDay(ctx.monthIdx, day)
+  if (evDate < ctx.todayMid) return 'past'
+  if (evDate.getTime() === ctx.todayMid.getTime()) return 'today'
+  return 'upcoming'
+}
+
+function buildTimelineEvents(incomeList, activeExpenses, ctx) {
   const events = []
 
   incomeList.forEach(inc => {
-    events.push({ 
-      type: inc.isNegativeCarry ? 'expense' : 'income', 
-      day: inc.day, 
-      label: inc.label, 
-      amount: inc.amount 
+    events.push({
+      type: inc.isNegativeCarry ? 'expense' : 'income',
+      day: inc.day,
+      label: inc.label,
+      amount: inc.amount
     })
   })
 
-  // Group similar card expenses on the same day to avoid UI clutter
+  // Agrupa despesas do mesmo cartão/dia para não poluir a UI
   const groupedCards = {}
   activeExpenses.forEach(exp => {
     const key = `${exp.cardName}-${exp.payDay}`
@@ -182,6 +254,17 @@ function buildTimelineEvents(incomeList, activeExpenses) {
       amount: g.amount,
       lateLabel: g.hasFee ? 'Atraso embutido' : null
     })
+  })
+
+  // Status relativo a hoje + estimativa de encargos para o que já venceu neste mês
+  events.forEach(ev => {
+    ev.status = eventStatus(ctx, ev.day)
+    if ((ev.type === 'expense' || ev.type === 'late') && ev.status === 'past' && ctx.monthIdx === ctx.currentMonthIdx) {
+      const evDate = dateForMonthDay(ctx.monthIdx, ev.day)
+      const daysLate = Math.max(0, Math.round((ctx.todayMid - evDate) / 86400000))
+      ev.daysLate = daysLate
+      ev.lateEstimate = computeLateCharge(ev.amount, daysLate).charge
+    }
   })
 
   events.sort((a, b) => a.day - b.day)

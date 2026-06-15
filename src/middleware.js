@@ -34,7 +34,11 @@ export async function middleware(request) {
   } = await supabase.auth.getUser()
 
   const isAuthRoute = request.nextUrl.pathname.startsWith('/login')
-  const isProtectedRoute = request.nextUrl.pathname.startsWith('/dashboard')
+  const isProtectedRoute =
+    request.nextUrl.pathname.startsWith('/dashboard') ||
+    request.nextUrl.pathname.startsWith('/cards') ||
+    request.nextUrl.pathname.startsWith('/chat') ||
+    request.nextUrl.pathname.startsWith('/lancamentos')
 
   // Redireciona usuários não logados que tentam acessar o dashboard
   if (isProtectedRoute && !user) {

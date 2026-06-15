@@ -41,6 +41,14 @@ export async function POST(req) {
     // 2. Fetch User Data
     const { data: expenses } = await supabase.from('expenses').select('*').eq('user_id', user.id)
     const { data: extraIncome } = await supabase.from('extra_income').select('*').eq('user_id', user.id)
+    const { data: cards } = await supabase.from('cards').select('id, key, name').eq('user_id', user.id)
+
+    // Mapa para resolver o card_id a partir da chave/nome que a IA usar.
+    const cardIdByKey = {}
+    ;(cards || []).forEach(c => {
+      if (c.key) cardIdByKey[c.key.toLowerCase()] = c.id
+      if (c.name) cardIdByKey[c.name.toLowerCase()] = c.id
+    })
 
     // Build Context
     const dataContext = `
@@ -51,6 +59,9 @@ ${extraIncome && extraIncome.length > 0 ? extraIncome.map(i => `- ID: [${i.id}] 
 ---
 DESPESAS:
 ${expenses && expenses.length > 0 ? expenses.map(e => `- ID: [${e.id}] | Descrição: ${e.description} | Cartão: ${e.card} | R$${e.amount} | Mês Início: ${e.start_month} (${MONTHS_NAMES[e.start_month]}) | Parcelas: ${e.total_installments} | Vencimento: Dia ${e.pay_day || 5} | Taxa/Juros: ${e.is_fee}`).join('\n') : "Nenhuma despesa cadastrada."}
+---
+CARTÕES DO USUÁRIO (use a chave em "cartao"):
+${cards && cards.length > 0 ? cards.map(c => `- ${c.name} (chave: ${c.key || c.name.toLowerCase()})`).join('\n') : "Nenhum cartão cadastrado ainda."}
 ---
 MESES DE REFERÊNCIA (Índices válidos):
 0=Abril, 1=Maio, 2=Junho, 3=Julho, 4=Agosto, 5=Setembro, 6=Outubro, 7=Novembro, 8=Dezembro
@@ -109,18 +120,46 @@ REGRAS:
 
 DADOS DE CONTEXTO ESTÃO ANEXADOS AO COMANDO DO USUÁRIO.`;
 
-    let lastError = null
+    // Persiste a mensagem do usuário (histórico do chat).
+    const { data: userMessage } = await supabase
+      .from('chat_messages')
+      .insert({ user_id: user.id, role: 'user', content: userText.trim() })
+      .select()
+      .single()
+
+    // Busca as últimas mensagens para dar MEMÓRIA de conversa à IA.
+    const { data: recent } = await supabase
+      .from('chat_messages')
+      .select('role, content')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(16)
+    const history = (recent || []).reverse()
+
+    // Monta o histórico no formato do Gemini (assistant -> model).
+    const contents = history.map(m => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }],
+    }))
+
+    // Anexa o contexto financeiro à ÚLTIMA fala do usuário.
+    for (let i = contents.length - 1; i >= 0; i--) {
+      if (contents[i].role === 'user') {
+        contents[i] = { role: 'user', parts: [{ text: `${dataContext}\n\nCOMANDO DO USUÁRIO:\n${contents[i].parts[0].text}` }] }
+        break
+      }
+    }
+
     let responseText = null
     let modelUsed = ''
     let failedModels = []
 
     for (const model of GEMINI_MODELS) {
       try {
-        responseText = await callModel(userText.trim(), apiKey, model.id, SYSTEM_PROMPT, dataContext)
+        responseText = await callModel(apiKey, model.id, SYSTEM_PROMPT, contents)
         modelUsed = model.label
         break // Sucesso
       } catch (err) {
-        lastError = err
         failedModels.push({ model: model.label, error: err.message })
         console.warn(`[FinDash AI] ${model.label} falhou: ${err.message}`)
       }
@@ -151,13 +190,15 @@ DADOS DE CONTEXTO ESTÃO ANEXADOS AO COMANDO DO USUÁRIO.`;
         aiMessage += act.texto + '\n\n'
       }
       else if (act.acao === 'inserir_despesa') {
+        const cardKey = act.cartao || 'extra'
         const payload = {
           user_id: user.id,
           description: act.descricao || 'Despesa',
           amount: parseFloat(act.valor),
           start_month: act.mes_inicio_idx || 0,
           total_installments: act.parcelas || 1,
-          card: act.cartao || 'extra',
+          card: cardKey,
+          card_id: cardIdByKey[String(cardKey).toLowerCase()] || null,
           pay_day: parseInt(act.dia_vencimento) || 5,
           is_fee: !!act.is_fee,
           source: 'ai'
@@ -184,10 +225,20 @@ DADOS DE CONTEXTO ESTÃO ANEXADOS AO COMANDO DO USUÁRIO.`;
       }
     }
 
+    // Persiste a resposta do assistente (texto que vai pro chat).
+    const finalMessage = aiMessage.trim() || 'Pronto! Ações executadas com sucesso.'
+    const { data: assistantMessage } = await supabase
+      .from('chat_messages')
+      .insert({ user_id: user.id, role: 'assistant', content: finalMessage, model: modelUsed })
+      .select()
+      .single()
+
     return NextResponse.json({
       success: true,
       modelUsed,
-      message: aiMessage.trim(),
+      message: finalMessage,
+      userMessage,
+      assistantMessage,
     })
 
   } catch (error) {
@@ -196,10 +247,8 @@ DADOS DE CONTEXTO ESTÃO ANEXADOS AO COMANDO DO USUÁRIO.`;
   }
 }
 
-async function callModel(userText, apiKey, modelId, systemPrompt, dataContext) {
+async function callModel(apiKey, modelId, systemPrompt, contents) {
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`
-
-  const fullUserMessage = `${dataContext}\n\nCOMANDO DO USUÁRIO:\n${userText}`
 
   const res = await fetch(endpoint, {
     method: 'POST',
@@ -208,12 +257,9 @@ async function callModel(userText, apiKey, modelId, systemPrompt, dataContext) {
       systemInstruction: {
         parts: [{ text: systemPrompt }]
       },
-      contents: [{
-        role: 'user',
-        parts: [{ text: fullUserMessage }],
-      }],
+      contents,
       generationConfig: {
-        temperature: 0.1, // Para maior resiliência em JSON puro
+        temperature: 0.2,
         maxOutputTokens: 4000,
       },
     }),

@@ -3,6 +3,11 @@ export const MONTHS_NAMES = [
   'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
 ];
 
+// O período projetado vai de Abril a Dezembro de 2026.
+// Usado para mapear o índice do mês (0–8) para uma data real do calendário.
+export const BASE_YEAR = 2026;
+export const BASE_MONTH = 3; // Abril (Janeiro = 0)
+
 export const MONTH_MAP = Object.fromEntries(
   MONTHS_NAMES.map((name, i) => [name.toLowerCase(), i])
 );
