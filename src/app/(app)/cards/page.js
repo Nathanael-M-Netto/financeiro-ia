@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase-server'
 import { redirect } from 'next/navigation'
+import { monthIdxForDate } from '@/lib/finance-engine'
 import CardsClient from './CardsClient'
 
 export default async function CardsPage() {
@@ -21,5 +22,5 @@ export default async function CardsPage() {
     .select('*')
     .eq('user_id', user.id)
 
-  return <CardsClient initialCards={cards || []} expenses={expenses || []} userId={user.id} />
+  return <CardsClient initialCards={cards || []} expenses={expenses || []} userId={user.id} currentMonthIdx={monthIdxForDate()} />
 }

@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase-server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { formatCurrency } from '@/lib/finance-engine'
+import { formatCurrency, monthIdxForDate } from '@/lib/finance-engine'
 import { MONTHS_NAMES } from '@/lib/constants'
 import { analyzeCard } from '@/lib/card-analysis'
 import { cardChipStyle } from '@/lib/cards'
@@ -20,7 +20,8 @@ export default async function CardDetailPage({ params }) {
   const { data: expenses } = await supabase
     .from('expenses').select('*').eq('user_id', user.id)
 
-  const a = analyzeCard(expenses || [], card, 0)
+  const currentMonthIdx = monthIdxForDate()
+  const a = analyzeCard(expenses || [], card, currentMonthIdx)
   const pct = a.utilizationPct
   const utilColor = pct == null ? 'var(--info)' : pct >= 80 ? 'var(--neg)' : pct >= 50 ? 'var(--warn)' : 'var(--pos)'
 
@@ -42,7 +43,7 @@ export default async function CardDetailPage({ params }) {
       {/* KPIs */}
       <section className="kpi-grid">
         <div className="kpi-card" style={{ '--kpi-accent': 'var(--neg)' }}>
-          <div className="kpi-label">Fatura — Abril</div>
+          <div className="kpi-label">Fatura — {MONTHS_NAMES[currentMonthIdx] || MONTHS_NAMES[0]}</div>
           <div className="kpi-value" style={{ color: 'var(--neg)' }}>{formatCurrency(a.currentInvoice)}</div>
         </div>
         <div className="kpi-card" style={{ '--kpi-accent': utilColor }}>

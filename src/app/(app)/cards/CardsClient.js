@@ -5,20 +5,22 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase-browser'
 import { formatCurrency } from '@/lib/finance-engine'
+import { MONTHS_NAMES } from '@/lib/constants'
 import { DEFAULT_CARDS, cardChipStyle } from '@/lib/cards'
 import { analyzeAllCards } from '@/lib/card-analysis'
 import { IconPlus, IconPencil, IconTrash } from '@/lib/icons'
 
 const EMPTY_FORM = { id: null, name: '', color: '#4d83ff', credit_limit: '', closing_day: '', due_day: '' }
 
-export default function CardsClient({ initialCards, expenses = [], userId }) {
+export default function CardsClient({ initialCards, expenses = [], userId, currentMonthIdx = 0 }) {
   const router = useRouter()
   const supabase = createClient()
 
   const [cards, setCards] = useState(initialCards)
 
-  // Análise recalculada na hora: editar o limite atualiza a barra na hora.
-  const analyzed = useMemo(() => analyzeAllCards(expenses, cards), [expenses, cards])
+  // Análise no mês atual; editar o limite atualiza a barra na hora.
+  const analyzed = useMemo(() => analyzeAllCards(expenses, cards, currentMonthIdx), [expenses, cards, currentMonthIdx])
+  const monthLabel = MONTHS_NAMES[currentMonthIdx] || MONTHS_NAMES[0]
   const [form, setForm] = useState(EMPTY_FORM)
   const [showForm, setShowForm] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(null)
@@ -153,7 +155,7 @@ export default function CardsClient({ initialCards, expenses = [], userId }) {
                 </div>
                 <div className="card-tile-rows">
                   <div className="card-tile-row">
-                    <span>Fatura (Abril)</span>
+                    <span>Fatura ({monthLabel})</span>
                     <strong>{formatCurrency(a.currentInvoice)}</strong>
                   </div>
                   <div className="card-tile-row">

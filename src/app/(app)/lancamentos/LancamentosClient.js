@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase-browser'
-import { formatCurrency } from '@/lib/finance-engine'
+import { formatCurrency, monthIdxForDate } from '@/lib/finance-engine'
 import { MONTHS_NAMES } from '@/lib/constants'
 import { cardChipStyle } from '@/lib/cards'
 import { IconPlus, IconPencil, IconTrash, IconClose } from '@/lib/icons'
@@ -60,7 +60,7 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
   const openAdd = (type) => {
     setFormType(type)
     setEditingId(null)
-    setForm({ ...EMPTY, card_id: type === 'despesa' && cards[0] ? cards[0].id : '' })
+    setForm({ ...EMPTY, start_month: monthIdxForDate(), card_id: type === 'despesa' && cards[0] ? cards[0].id : '' })
     setShowModal(true)
   }
 
