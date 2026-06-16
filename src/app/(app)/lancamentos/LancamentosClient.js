@@ -227,7 +227,7 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
                         <tr key={e.id} className={`row-click ${sel ? 'row-selected' : ''}`} onClick={() => setSelected({ kind: 'despesa', id: e.id })}>
                           <td>{e.is_fee ? '⚠ ' : ''}{e.description || 'Despesa'}</td>
                           <td>{c ? <span className="tag" style={cardChipStyle(c.color)}>{c.name}</span> : (e.card || '—')}</td>
-                          <td>{monthName(e.start_month)}</td>
+                          <td>{monthName(e.start_month)}{e.pay_day ? <span className="row-sub"> · dia {e.pay_day}</span> : null}</td>
                           <td style={{ textAlign: 'center' }}><span className="inst-badge">{e.is_fee ? '—' : `${e.total_installments}x`}</span></td>
                           <td className="amt-col">{formatCurrency(parseFloat(e.amount) || 0)}</td>
                         </tr>
@@ -264,7 +264,7 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
                       return (
                         <tr key={i.id} className={`row-click ${sel ? 'row-selected' : ''}`} onClick={() => setSelected({ kind: 'receita', id: i.id })}>
                           <td>{i.description || 'Receita'}</td>
-                          <td>{monthName(i.start_month)}</td>
+                          <td>{monthName(i.start_month)}{i.pay_day ? <span className="row-sub"> · dia {i.pay_day}</span> : null}</td>
                           <td style={{ textAlign: 'center' }}><span className="inst-badge">{i.total_months || 1} m</span></td>
                           <td className="amt-col pos">{formatCurrency(parseFloat(i.amount) || 0)}</td>
                         </tr>

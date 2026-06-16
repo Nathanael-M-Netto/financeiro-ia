@@ -1227,3 +1227,34 @@ body { min-height: 100vh; overflow-x: hidden; background: var(--bg); color: var(
   }
   .detail-panel.open { transform: translateY(0); box-shadow: 0 -12px 44px rgba(0,0,0,.55); }
 }
+
+/* ═══════════════════════════════════════
+   Lançamentos — alinhamento da tabela + data
+═══════════════════════════════════════ */
+.row-sub { color: var(--text3); font-size: .9em; }
+.exp-table-rows thead th { background: rgba(255,255,255,.018); padding-top: 11px; padding-bottom: 10px; }
+.exp-table-rows th:first-child, .exp-table-rows td:first-child { padding-left: 22px; }
+.exp-table-rows th:last-child, .exp-table-rows td:last-child { padding-right: 22px; }
+.exp-table-rows tbody tr:last-child td { border-bottom: none; }
+.detail-empty { display: flex; align-items: center; justify-content: center; min-height: 160px; }
+
+/* ═══════════════════════════════════════
+   CORREÇÃO DEFINITIVA DO MOBILE
+   (este bloco é o último do arquivo → vence
+    qualquer regra não-mobile anterior)
+═══════════════════════════════════════ */
+@media (max-width: 900px) {
+  .app-mobilebar { display: flex; }
+  .app-sidebar { width: min(286px, 84vw); transform: translateX(-100%); }
+  .app-sidebar.open { transform: translateX(0); box-shadow: 0 0 50px rgba(0,0,0,.55); }
+  .app-main { margin-left: 0; padding-top: 54px; }
+  .page, .cards-page { padding: 20px 14px 60px; }
+  .chat-page { height: calc(100dvh - 54px); }
+  .dash-grid, .lanc-layout { grid-template-columns: 1fr; }
+  .detail-panel {
+    position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 95;
+    border-radius: 14px 14px 0 0; max-height: 84vh; overflow-y: auto;
+    transform: translateY(110%); transition: transform .25s ease;
+  }
+  .detail-panel.open { transform: translateY(0); box-shadow: 0 -12px 44px rgba(0,0,0,.55); }
+}

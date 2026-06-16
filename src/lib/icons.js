@@ -50,3 +50,5 @@ export const IconLogout = (p) => (
   <Svg {...p}><path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3M10 8l-4 4 4 4M6 12h11" /></Svg>
 )
 export const IconSend = (p) => (<Svg {...p}><path d="M5 12 20 4l-5 16-3.5-6.5L5 12Z" /></Svg>)
+export const IconClock = (p) => (<Svg {...p}><circle cx="12" cy="12" r="9" /><path d="M12 7.5V12l3 1.8" /></Svg>)
+export const IconCheckCircle = ({ filled, ...p }) => (<Svg {...p}><circle cx="12" cy="12" r="9" fill={filled ? 'currentColor' : 'none'} /><path d="M8.5 12.2l2.3 2.3 4.7-4.8" stroke={filled ? '#0a0a0c' : 'currentColor'} /></Svg>)
