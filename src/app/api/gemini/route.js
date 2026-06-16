@@ -137,6 +137,18 @@ DADOS DE CONTEXTO ESTÃO ANEXADOS AO COMANDO DO USUÁRIO.`;
       .limit(16)
     const history = (recent || []).reverse()
 
+    // Mensagens marcadas pelo usuário = contexto prioritário para a IA.
+    const { data: starred } = await supabase
+      .from('chat_messages')
+      .select('role, content')
+      .eq('user_id', user.id)
+      .eq('is_starred', true)
+      .order('created_at', { ascending: true })
+      .limit(12)
+    const starredContext = (starred && starred.length > 0)
+      ? `\nMENSAGENS QUE O USUÁRIO MARCOU COMO IMPORTANTES (priorize este contexto):\n${starred.map(s => `- (${s.role === 'assistant' ? 'IA' : 'usuário'}) ${s.content}`).join('\n')}\n`
+      : ''
+
     // Monta o histórico no formato do Gemini (assistant -> model).
     const contents = history.map(m => ({
       role: m.role === 'assistant' ? 'model' : 'user',
@@ -146,7 +158,7 @@ DADOS DE CONTEXTO ESTÃO ANEXADOS AO COMANDO DO USUÁRIO.`;
     // Anexa o contexto financeiro à ÚLTIMA fala do usuário.
     for (let i = contents.length - 1; i >= 0; i--) {
       if (contents[i].role === 'user') {
-        contents[i] = { role: 'user', parts: [{ text: `${dataContext}\n\nCOMANDO DO USUÁRIO:\n${contents[i].parts[0].text}` }] }
+        contents[i] = { role: 'user', parts: [{ text: `${dataContext}${starredContext}\n\nCOMANDO DO USUÁRIO:\n${contents[i].parts[0].text}` }] }
         break
       }
     }

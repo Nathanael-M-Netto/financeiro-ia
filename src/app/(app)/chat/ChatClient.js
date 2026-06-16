@@ -52,9 +52,11 @@ export default function ChatClient({ initialMessages, userId, userName }) {
   const [error, setError] = useState(null)
   const [filterStarred, setFilterStarred] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
+  const [actionMsg, setActionMsg] = useState(null) // mensagem aberta no menu (segurar/botão direito)
 
   const threadRef = useRef(null)
   const inputRef = useRef(null)
+  const pressTimer = useRef(null)
 
   useEffect(() => {
     if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight
@@ -99,6 +101,21 @@ export default function ChatClient({ initialMessages, userId, userName }) {
     setMessages([])
     setConfirmClear(false)
     setFilterStarred(false)
+  }
+
+  const deleteMsg = async (msg) => {
+    setMessages(prev => prev.filter(m => m.id !== msg.id))
+    setActionMsg(null)
+    await supabase.from('chat_messages').delete().eq('id', msg.id).eq('user_id', userId)
+  }
+
+  // Segurar a mensagem (~0,45s) abre o menu de ações.
+  const startPress = (msg) => {
+    cancelPress()
+    pressTimer.current = setTimeout(() => setActionMsg(msg), 450)
+  }
+  const cancelPress = () => {
+    if (pressTimer.current) { clearTimeout(pressTimer.current); pressTimer.current = null }
   }
 
   const onKeyDown = (e) => {
@@ -153,7 +170,14 @@ export default function ChatClient({ initialMessages, userId, userName }) {
         ) : (
           shown.map((m) => (
             <div key={m.id} className={`chat-msg ${m.role}`}>
-              <div className={`chat-bubble ${m.is_starred ? 'starred' : ''}`}>
+              <div
+                className={`chat-bubble ${m.is_starred ? 'starred' : ''}`}
+                onPointerDown={() => startPress(m)}
+                onPointerUp={cancelPress}
+                onPointerLeave={cancelPress}
+                onPointerCancel={cancelPress}
+                onContextMenu={(e) => { e.preventDefault(); setActionMsg(m) }}
+              >
                 {formatMessage(m.content)}
                 {m.role === 'assistant' && m.model && <div className="chat-meta">via {m.model}</div>}
               </div>
@@ -211,6 +235,23 @@ export default function ChatClient({ initialMessages, userId, userName }) {
           </div>
         </div>
       </div>
+
+      {/* Menu da mensagem — segurar a mensagem ou clicar com o botão direito */}
+      {actionMsg && (
+        <div className="msg-sheet-backdrop" onClick={() => setActionMsg(null)}>
+          <div className="msg-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="msg-sheet-preview">{actionMsg.content.length > 140 ? actionMsg.content.slice(0, 140) + '…' : actionMsg.content}</div>
+            <button className="msg-sheet-btn" onClick={() => { toggleStar(actionMsg); setActionMsg(null) }}>
+              <IconStar size={16} filled={actionMsg.is_starred} />
+              {actionMsg.is_starred ? 'Desmarcar' : 'Marcar para a IA usar de contexto'}
+            </button>
+            <button className="msg-sheet-btn danger" onClick={() => deleteMsg(actionMsg)}>
+              <IconTrash size={16} /> Apagar mensagem
+            </button>
+            <button className="msg-sheet-btn cancel" onClick={() => setActionMsg(null)}>Cancelar</button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
