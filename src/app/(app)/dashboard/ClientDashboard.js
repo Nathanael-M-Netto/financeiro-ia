@@ -6,12 +6,39 @@ import { CARD_META } from '@/lib/constants'
 import { CATEGORY_META } from '@/lib/categorize'
 import { IconChevronLeft, IconChevronRight, IconAlert, IconCheck } from '@/lib/icons'
 
+// Gráfico de rosca (só o perímetro dividido entre as categorias, centro vazio).
+function CategoryDonut({ data, total, selected, onSelect }) {
+  const r = 42, sw = 18, circ = 2 * Math.PI * r
+  const lens = data.map(d => (total > 0 ? (d.total / total) * circ : 0))
+  const offsets = lens.map((_, i) => lens.slice(0, i).reduce((a, b) => a + b, 0))
+  return (
+    <svg viewBox="0 0 120 120" className="donut" role="img" aria-label="Gastos por categoria">
+      <circle cx="60" cy="60" r={r} fill="none" stroke="var(--surface2)" strokeWidth={sw} />
+      {data.map((d, i) => {
+        const meta = CATEGORY_META[d.key] || CATEGORY_META.outros
+        const dash = Math.max(0, lens[i] - 1.5) // pequeno gap entre as fatias
+        return (
+          <circle
+            key={d.key} cx="60" cy="60" r={r} fill="none"
+            stroke={meta.color} strokeWidth={selected === d.key ? sw + 4 : sw}
+            strokeDasharray={`${dash} ${circ - dash}`} strokeDashoffset={-offsets[i]}
+            transform="rotate(-90 60 60)" strokeLinecap="butt"
+            style={{ cursor: 'pointer', transition: 'stroke-width .15s' }}
+            onClick={() => onSelect(d.key)}
+          />
+        )
+      })}
+    </svg>
+  )
+}
+
 export default function ClientDashboard({ initialExpenses, initialIncome }) {
   // A data real só é lida no cliente, após montar — assim o HTML do servidor e o
   // primeiro render do cliente são idênticos (sem divergência de hidratação).
   const [today, setToday] = useState(null)
   const [currentMonth, setCurrentMonth] = useState(0)
   const [realMonth, setRealMonth] = useState(0) // mês de hoje; abas só mostram daqui pra frente
+  const [selectedCat, setSelectedCat] = useState(null) // categoria aberta no drilldown
 
   useEffect(() => {
     const t = new Date()
@@ -179,21 +206,38 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
               {byCategory.arr.length === 0 ? (
                 <div className="chart-empty">Nenhuma despesa neste mês.</div>
               ) : (
-                <div className="bycat-list">
-                  {byCategory.arr.map((c) => {
-                    const meta = CATEGORY_META[c.key] || CATEGORY_META.outros
-                    const pct = byCategory.total > 0 ? (c.total / byCategory.total) * 100 : 0
-                    return (
-                      <div key={c.key} className="bycat-row">
-                        <div className="bycat-head">
-                          <span className="bycat-name"><span className="cat-dot" style={{ background: meta.color }} />{meta.name}</span>
-                          <span className="bycat-val">{formatCurrency(c.total)} · {pct.toFixed(0)}%</span>
-                        </div>
-                        <div className="bycat-bar"><div className="bycat-fill" style={{ width: `${pct}%`, background: meta.color }} /></div>
+                <>
+                  <div className="cat-chart">
+                    <CategoryDonut data={byCategory.arr} total={byCategory.total} selected={selectedCat} onSelect={(k) => setSelectedCat(s => (s === k ? null : k))} />
+                    <div className="cat-legend">
+                      {byCategory.arr.map((c) => {
+                        const meta = CATEGORY_META[c.key] || CATEGORY_META.outros
+                        const pct = byCategory.total > 0 ? (c.total / byCategory.total) * 100 : 0
+                        return (
+                          <button key={c.key} className={`cat-leg ${selectedCat === c.key ? 'on' : ''}`} onClick={() => setSelectedCat(s => (s === c.key ? null : c.key))}>
+                            <span className="cat-dot" style={{ background: meta.color }} />
+                            <span className="cat-leg-name">{meta.name}</span>
+                            <span className="cat-leg-val">{pct.toFixed(0)}%</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  {selectedCat && (
+                    <div className="cat-drill">
+                      <div className="cat-drill-hd">
+                        <span>{(CATEGORY_META[selectedCat] || CATEGORY_META.outros).name}</span>
+                        <strong>{formatCurrency(byCategory.arr.find(c => c.key === selectedCat)?.total || 0)}</strong>
                       </div>
-                    )
-                  })}
-                </div>
+                      {currentMetric.expensesList.filter(e => (e.category || 'outros') === selectedCat).map((e, i) => (
+                        <div key={i} className="cat-drill-row">
+                          <span>{e.desc}<span className="cat-drill-card"> · {e.cardName}</span></span>
+                          <span>{formatCurrency(e.amount)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>
