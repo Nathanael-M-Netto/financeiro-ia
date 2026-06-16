@@ -125,7 +125,16 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
   const save = async () => {
     if (!form.description.trim()) { showToast('Dê uma descrição.', 'error'); return }
     const amount = Number(form.amount)
-    if (!amount || amount <= 0) { showToast('Informe um valor válido.', 'error'); return }
+    if (!isFinite(amount) || amount <= 0) { showToast('Informe um valor válido (maior que zero).', 'error'); return }
+    const day = form.pay_day === '' ? null : parseInt(form.pay_day, 10)
+    if (day !== null && (isNaN(day) || day < 1 || day > 31)) { showToast('O dia deve ser entre 1 e 31.', 'error'); return }
+    if (formType === 'despesa') {
+      const p = Number(form.total_installments)
+      if (!isFinite(p) || p < 1 || p > 360) { showToast('Parcelas inválidas (de 1 a 360).', 'error'); return }
+    } else {
+      const mm = Number(form.total_months)
+      if (!isFinite(mm) || mm < 1 || mm > 360) { showToast('Duração inválida (de 1 a 360 meses).', 'error'); return }
+    }
 
     setBusy(true)
     try {

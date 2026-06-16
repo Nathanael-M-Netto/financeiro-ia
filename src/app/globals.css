@@ -1388,3 +1388,11 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
   }
   .mobile-collapsed .dash-detail { display: none; }
 }
+
+/* ═══════════════════════════════════════
+   Saldo atual em mais destaque
+═══════════════════════════════════════ */
+.saldo-atual { background: linear-gradient(155deg, rgba(16,212,156,.12), var(--surface)); border-color: rgba(16,212,156,.3); padding: 20px 22px; position: relative; overflow: hidden; }
+.saldo-atual::after { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--pos); }
+.saldo-atual .hero-label { color: var(--pos); font-weight: 700; }
+.saldo-atual-val { font-size: 2.2rem; color: var(--pos); }

@@ -203,33 +203,39 @@ DADOS DE CONTEXTO ESTÃO ANEXADOS AO COMANDO DO USUÁRIO.`;
         aiMessage += act.texto + '\n\n'
       }
       else if (act.acao === 'inserir_despesa') {
-        const cardKey = act.cartao || 'extra'
-        const payload = {
-          user_id: user.id,
-          description: act.descricao || 'Despesa',
-          amount: parseFloat(act.valor),
-          start_month: act.mes_inicio_idx || 0,
-          total_installments: act.parcelas || 1,
-          card: cardKey,
-          card_id: cardIdByKey[String(cardKey).toLowerCase()] || null,
-          category: categorize(act.descricao) || null,
-          pay_day: parseInt(act.dia_vencimento) || 5,
-          is_fee: !!act.is_fee,
-          source: 'ai'
+        const amountVal = parseFloat(act.valor)
+        if (isFinite(amountVal) && amountVal > 0) {
+          const cardKey = act.cartao || 'extra'
+          const payload = {
+            user_id: user.id,
+            description: act.descricao || 'Despesa',
+            amount: amountVal,
+            start_month: Math.min(8, Math.max(0, parseInt(act.mes_inicio_idx) || 0)),
+            total_installments: Math.min(360, Math.max(1, parseInt(act.parcelas) || 1)),
+            card: cardKey,
+            card_id: cardIdByKey[String(cardKey).toLowerCase()] || null,
+            category: categorize(act.descricao) || null,
+            pay_day: Math.min(31, Math.max(1, parseInt(act.dia_vencimento) || 5)),
+            is_fee: !!act.is_fee,
+            source: 'ai'
+          }
+          await supabase.from('expenses').insert(payload)
         }
-        await supabase.from('expenses').insert(payload)
       }
       else if (act.acao === 'inserir_receita') {
-        const payload = {
-          user_id: user.id,
-          description: act.descricao || 'Receita',
-          amount: parseFloat(act.valor),
-          start_month: act.mes_inicio_idx || 0,
-          total_months: act.meses_recorrente || 1,
-          pay_day: act.dia_pagamento || 5,
-          source: 'ai'
+        const amountVal = parseFloat(act.valor)
+        if (isFinite(amountVal) && amountVal > 0) {
+          const payload = {
+            user_id: user.id,
+            description: act.descricao || 'Receita',
+            amount: amountVal,
+            start_month: Math.min(8, Math.max(0, parseInt(act.mes_inicio_idx) || 0)),
+            total_months: Math.min(360, Math.max(1, parseInt(act.meses_recorrente) || 1)),
+            pay_day: Math.min(31, Math.max(1, parseInt(act.dia_pagamento) || 5)),
+            source: 'ai'
+          }
+          await supabase.from('extra_income').insert(payload)
         }
-        await supabase.from('extra_income').insert(payload)
       }
       else if (act.acao === 'apagar_despesa' && act.id) {
         await supabase.from('expenses').delete().eq('id', act.id).eq('user_id', user.id)
