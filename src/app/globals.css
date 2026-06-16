@@ -1258,3 +1258,37 @@ body { min-height: 100vh; overflow-x: hidden; background: var(--bg); color: var(
   }
   .detail-panel.open { transform: translateY(0); box-shadow: 0 -12px 44px rgba(0,0,0,.55); }
 }
+
+/* ═══════════════════════════════════════
+   Inputs numéricos: esconder setinhas cruas
+═══════════════════════════════════════ */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+
+/* ═══════════════════════════════════════
+   Categorias (chip + gráfico por categoria)
+═══════════════════════════════════════ */
+.cat-chip { display: inline-flex; align-items: center; gap: 5px; font-size: .66rem; font-weight: 700; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.cat-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.bycat-list { display: flex; flex-direction: column; gap: 13px; margin-top: 14px; }
+.bycat-row { display: flex; flex-direction: column; gap: 6px; }
+.bycat-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: .78rem; }
+.bycat-name { color: var(--text); font-weight: 600; display: inline-flex; align-items: center; gap: 7px; }
+.bycat-val { color: var(--text2); font-variant-numeric: tabular-nums; white-space: nowrap; font-family: var(--font-mono); }
+.bycat-bar { height: 8px; background: var(--surface2); border-radius: 99px; overflow: hidden; border: 1px solid var(--border); }
+.bycat-fill { height: 100%; border-radius: 99px; transition: width .3s ease; }
+
+/* ═══════════════════════════════════════
+   Histórico
+═══════════════════════════════════════ */
+.hist-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+.hist-card .card-body { padding: 18px 20px; }
+.hist-month { font-size: 1rem; font-weight: 800; color: var(--text); margin-bottom: 14px; }
+.hist-rows { display: flex; flex-direction: column; gap: 9px; }
+.hist-row { display: flex; justify-content: space-between; font-size: .82rem; color: var(--text2); }
+.hist-row strong { font-variant-numeric: tabular-nums; font-family: var(--font-mono); }
+.hist-pos { color: var(--pos); }
+.hist-neg { color: var(--neg); }
+.hist-bal { border-top: 1px solid var(--border); padding-top: 9px; margin-top: 2px; }
+.hist-empty { font-size: .8rem; color: var(--text3); font-style: italic; padding: 8px 0; }

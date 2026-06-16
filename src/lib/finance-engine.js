@@ -93,7 +93,8 @@ export function computeAll(expenses = [], extraIncome = [], today = null) {
           instStr: exp.is_fee ? '—' : `${current_inst}/${total_installments}`,
           payDay: exp.pay_day || CARD_META[exp.card]?.payDay || 10,
           isNubank: exp.card === 'nubank',
-          isFee: !!exp.is_fee
+          isFee: !!exp.is_fee,
+          category: exp.category || null
         }
       }
       return null

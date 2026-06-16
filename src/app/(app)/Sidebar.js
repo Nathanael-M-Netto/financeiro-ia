@@ -6,7 +6,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase-browser'
 import {
   IconBrand, IconDashboard, IconReceipt, IconCard, IconSparkles,
-  IconLogout, IconMenu, IconClose,
+  IconLogout, IconMenu, IconClose, IconClock,
 } from '@/lib/icons'
 
 const NAV_SECTIONS = [
@@ -16,6 +16,7 @@ const NAV_SECTIONS = [
       { href: '/dashboard', label: 'Visão geral', Icon: IconDashboard },
       { href: '/lancamentos', label: 'Lançamentos', Icon: IconReceipt },
       { href: '/cards', label: 'Cartões', Icon: IconCard },
+      { href: '/historico', label: 'Histórico', Icon: IconClock },
     ],
   },
   {

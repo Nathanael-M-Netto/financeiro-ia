@@ -3,6 +3,7 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import { computeAll, formatCurrency, monthIdxForDate } from '@/lib/finance-engine'
 import { CARD_META } from '@/lib/constants'
+import { CATEGORY_META } from '@/lib/categorize'
 import { IconChevronLeft, IconChevronRight, IconAlert, IconCheck } from '@/lib/icons'
 
 export default function ClientDashboard({ initialExpenses, initialIncome }) {
@@ -10,12 +11,15 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
   // primeiro render do cliente são idênticos (sem divergência de hidratação).
   const [today, setToday] = useState(null)
   const [currentMonth, setCurrentMonth] = useState(0)
+  const [realMonth, setRealMonth] = useState(0) // mês de hoje; abas só mostram daqui pra frente
 
   useEffect(() => {
     const t = new Date()
+    const idx = monthIdxForDate(t)
     /* eslint-disable react-hooks/set-state-in-effect */
     setToday(t)
-    setCurrentMonth(monthIdxForDate(t))
+    setCurrentMonth(idx)
+    setRealMonth(idx)
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [])
 
@@ -49,6 +53,19 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
     return { arr, total }
   }, [currentMetric])
 
+  // Gastos agrupados por categoria no mês selecionado.
+  const byCategory = useMemo(() => {
+    const map = {}
+    currentMetric.expensesList.forEach(e => {
+      const key = e.category || 'outros'
+      if (!map[key]) map[key] = { key, total: 0 }
+      map[key].total += e.amount
+    })
+    const arr = Object.values(map).sort((a, b) => b.total - a.total)
+    const total = arr.reduce((s, c) => s + c.total, 0)
+    return { arr, total }
+  }, [currentMetric])
+
   return (
     <div className="page anim">
       <header className="app-topbar">
@@ -57,15 +74,15 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
           <p className="page-sub">Sua projeção financeira do mês</p>
         </div>
         <div className="month-stepper">
-          <button className="icon-btn-sq" disabled={currentMonth === 0} onClick={() => setCurrentMonth(m => Math.max(0, m - 1))} aria-label="Mês anterior"><IconChevronLeft size={18} /></button>
+          <button className="icon-btn-sq" disabled={currentMonth <= realMonth} onClick={() => setCurrentMonth(m => Math.max(realMonth, m - 1))} aria-label="Mês anterior"><IconChevronLeft size={18} /></button>
           <button className="icon-btn-sq" disabled={currentMonth === 8} onClick={() => setCurrentMonth(m => Math.min(8, m + 1))} aria-label="Próximo mês"><IconChevronRight size={18} /></button>
         </div>
       </header>
 
       {/* Seletor de meses em abas */}
       <div className="month-tabs">
-        {metrics.map((m, i) => (
-          <button key={i} className={`month-tab ${currentMonth === i ? 'active' : ''} ${m.isCurrent ? 'is-current' : ''}`} onClick={() => setCurrentMonth(i)}>
+        {metrics.filter(m => m.idx >= realMonth).map((m) => (
+          <button key={m.idx} className={`month-tab ${currentMonth === m.idx ? 'active' : ''} ${m.isCurrent ? 'is-current' : ''}`} onClick={() => setCurrentMonth(m.idx)}>
             <span className="month-tab-name">{m.monthName}{m.isCurrent && <span className="month-tab-today">hoje</span>}</span>
             <span className="month-tab-bal" style={{ color: m.balance >= 0 ? 'var(--pos)' : 'var(--neg)' }}>{formatCurrency(m.balance)}</span>
           </button>
@@ -148,6 +165,31 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
                           <span className="bycard-val">{formatCurrency(c.total)} · {pctTotal.toFixed(0)}%</span>
                         </div>
                         <div className="bycard-bar"><div className="bycard-fill" style={{ width: `${pctTotal}%`, background: color }} /></div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="card chart-card">
+            <div className="card-body">
+              <div className="timeline-title">Gastos por categoria — {currentMetric.monthName}</div>
+              {byCategory.arr.length === 0 ? (
+                <div className="chart-empty">Nenhuma despesa neste mês.</div>
+              ) : (
+                <div className="bycat-list">
+                  {byCategory.arr.map((c) => {
+                    const meta = CATEGORY_META[c.key] || CATEGORY_META.outros
+                    const pct = byCategory.total > 0 ? (c.total / byCategory.total) * 100 : 0
+                    return (
+                      <div key={c.key} className="bycat-row">
+                        <div className="bycat-head">
+                          <span className="bycat-name"><span className="cat-dot" style={{ background: meta.color }} />{meta.name}</span>
+                          <span className="bycat-val">{formatCurrency(c.total)} · {pct.toFixed(0)}%</span>
+                        </div>
+                        <div className="bycat-bar"><div className="bycat-fill" style={{ width: `${pct}%`, background: meta.color }} /></div>
                       </div>
                     )
                   })}

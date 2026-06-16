@@ -38,7 +38,8 @@ export async function middleware(request) {
     request.nextUrl.pathname.startsWith('/dashboard') ||
     request.nextUrl.pathname.startsWith('/cards') ||
     request.nextUrl.pathname.startsWith('/chat') ||
-    request.nextUrl.pathname.startsWith('/lancamentos')
+    request.nextUrl.pathname.startsWith('/lancamentos') ||
+    request.nextUrl.pathname.startsWith('/historico')
 
   // Redireciona usuários não logados que tentam acessar o dashboard
   if (isProtectedRoute && !user) {

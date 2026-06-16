@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { MONTHS_NAMES, CARD_META } from '@/lib/constants' // Make sure constants are correctly exported
+import { categorize } from '@/lib/categorize'
 
 const GEMINI_MODELS = [
   { id: 'gemini-3.1-flash-lite-preview', label: 'Gemini 3.1 Flash Lite' },
@@ -199,6 +200,7 @@ DADOS DE CONTEXTO ESTÃO ANEXADOS AO COMANDO DO USUÁRIO.`;
           total_installments: act.parcelas || 1,
           card: cardKey,
           card_id: cardIdByKey[String(cardKey).toLowerCase()] || null,
+          category: categorize(act.descricao) || null,
           pay_day: parseInt(act.dia_vencimento) || 5,
           is_fee: !!act.is_fee,
           source: 'ai'

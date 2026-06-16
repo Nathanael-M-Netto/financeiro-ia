@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase-browser'
 import { formatCurrency, monthIdxForDate } from '@/lib/finance-engine'
 import { MONTHS_NAMES } from '@/lib/constants'
 import { cardChipStyle } from '@/lib/cards'
+import { categorize, CATEGORY_META, CATEGORY_KEYS } from '@/lib/categorize'
 import { IconPlus, IconPencil, IconTrash, IconClose } from '@/lib/icons'
 
 function DetailRow({ label, value, mono }) {
@@ -18,7 +19,7 @@ function DetailRow({ label, value, mono }) {
 }
 
 const EMPTY = {
-  description: '', amount: '', card_id: '',
+  description: '', amount: '', card_id: '', category: '',
   start_month: 0, total_installments: 1, total_months: 1,
   pay_day: '', is_fee: false,
 }
@@ -36,6 +37,7 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [confirmClearAll, setConfirmClearAll] = useState(false)
   const [selected, setSelected] = useState(null)
+  const [catTouched, setCatTouched] = useState(false) // se o usuário escolheu a categoria na mão
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' })
 
@@ -57,18 +59,51 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
     router.refresh()
   }
 
+  // Preenche a categoria das despesas sem categoria, deduzindo pelo nome.
+  const categorizeAll = async () => {
+    const toUpdate = expenses
+      .filter(e => !e.category)
+      .map(e => ({ id: e.id, category: categorize(e.description) }))
+      .filter(x => x.category)
+    if (toUpdate.length === 0) { showToast('Nada novo para categorizar.', 'success'); return }
+    setBusy(true)
+    try {
+      for (const u of toUpdate) {
+        const { error } = await supabase.from('expenses').update({ category: u.category }).eq('id', u.id).eq('user_id', userId)
+        if (error) throw error
+      }
+      await reload()
+      showToast(`${toUpdate.length} despesa(s) categorizada(s).`)
+    } catch (e) {
+      showToast(`Erro: ${e.message}`, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const openAdd = (type) => {
     setFormType(type)
     setEditingId(null)
+    setCatTouched(false)
     setForm({ ...EMPTY, start_month: monthIdxForDate(), card_id: type === 'despesa' && cards[0] ? cards[0].id : '' })
     setShowModal(true)
+  }
+
+  // Atualiza a descrição e, se o usuário ainda não escolheu categoria na mão, sugere uma pelo nome.
+  const onDescChange = (val) => {
+    setForm(f => ({
+      ...f,
+      description: val,
+      category: (formType === 'despesa' && !catTouched) ? (categorize(val) || '') : f.category,
+    }))
   }
 
   const openEditExpense = (e) => {
     setFormType('despesa')
     setEditingId(e.id)
+    setCatTouched(true)
     setForm({
-      description: e.description || '', amount: e.amount ?? '',
+      description: e.description || '', amount: e.amount ?? '', category: e.category || '',
       card_id: e.card_id || (cards.find(c => c.key === e.card)?.id) || '',
       start_month: e.start_month || 0, total_installments: e.total_installments || 1,
       total_months: 1, pay_day: e.pay_day ?? '', is_fee: !!e.is_fee,
@@ -102,6 +137,7 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
           amount,
           card: card ? (card.key || card.name.toLowerCase()) : 'extra',
           card_id: form.card_id || null,
+          category: form.category || null,
           start_month: Number(form.start_month) || 0,
           total_installments: Number(form.total_installments) || 1,
           pay_day: form.pay_day === '' ? null : parseInt(form.pay_day, 10),
@@ -192,6 +228,9 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
           <p className="page-sub">Adicione, edite ou exclua despesas e receitas manualmente.</p>
         </div>
         <div className="lanc-add-actions">
+          {expenses.some(e => !e.category) && (
+            <button className="btn-ghost" onClick={categorizeAll} disabled={busy} title="Preenche a categoria pelo nome">Auto-categorizar</button>
+          )}
           <button className="btn-soft-neg" onClick={() => openAdd('despesa')}><IconPlus size={16} /> Nova despesa</button>
           <button className="btn-soft-pos" onClick={() => openAdd('receita')}><IconPlus size={16} /> Nova receita</button>
         </div>
@@ -297,6 +336,7 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
                 {selected.kind === 'despesa' ? (
                   <>
                     <DetailRow label="Cartão" value={cardFor(selectedItem)?.name || selectedItem.card || '—'} />
+                    <DetailRow label="Categoria" value={selectedItem.category && CATEGORY_META[selectedItem.category] ? CATEGORY_META[selectedItem.category].name : '—'} />
                     <DetailRow label="Mês de início" value={monthName(selectedItem.start_month)} />
                     <DetailRow label="Parcelas" value={selectedItem.is_fee ? '—' : `${selectedItem.total_installments}x`} mono />
                     <DetailRow label="Vencimento" value={selectedItem.pay_day ? `dia ${selectedItem.pay_day}` : '—'} mono />
@@ -344,8 +384,8 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
             <div className="form-group">
               <label className="form-label">Descrição</label>
               <input className="form-input" value={form.description} maxLength={80}
-                onChange={e => setForm({ ...form, description: e.target.value })}
-                placeholder={formType === 'despesa' ? 'Ex: Mercado, Fatura...' : 'Ex: Salário'} />
+                onChange={e => onDescChange(e.target.value)}
+                placeholder={formType === 'despesa' ? 'Ex: Mercado, Netflix, Uber...' : 'Ex: Salário'} />
             </div>
 
             <div className="form-row">
@@ -379,6 +419,14 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
                     <input className="form-input" type="number" min="1" max="48" value={form.total_installments}
                       onChange={e => setForm({ ...form, total_installments: e.target.value })} />
                   </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Categoria {!catTouched && form.category ? <span style={{ color: 'var(--info)', fontWeight: 700 }}>· sugerida pelo nome</span> : null}</label>
+                  <select className="form-input" value={form.category}
+                    onChange={e => { setCatTouched(true); setForm({ ...form, category: e.target.value }) }}>
+                    <option value="">Sem categoria</option>
+                    {CATEGORY_KEYS.map(k => <option key={k} value={k}>{CATEGORY_META[k].name}</option>)}
+                  </select>
                 </div>
                 <div className="form-row">
                   <div className="form-group">
