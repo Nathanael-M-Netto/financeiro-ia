@@ -1364,3 +1364,27 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 .msg-sheet-btn.danger:hover { border-color: var(--neg); }
 .msg-sheet-btn.cancel { justify-content: center; color: var(--text2); background: transparent; }
 @media (min-width: 600px) { .msg-sheet-backdrop { align-items: center; } }
+
+/* ═══════════════════════════════════════
+   Mobile — visão enxuta + "Ver detalhes"
+═══════════════════════════════════════ */
+.mobile-summary { display: none; }
+.dash-details-toggle { display: none; }
+@media (max-width: 900px) {
+  .mobile-summary {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--r);
+    padding: 16px; margin-bottom: 14px;
+  }
+  .ms-item { display: flex; flex-direction: column; gap: 3px; }
+  .ms-item span { font-size: .6rem; text-transform: uppercase; letter-spacing: .06em; color: var(--text3); font-weight: 700; }
+  .ms-item strong { font-size: 1.2rem; font-weight: 800; font-family: var(--font-mono); letter-spacing: -.02em; }
+  .ms-pos { color: var(--pos); }
+  .ms-warn { color: var(--warn); }
+  .dash-details-toggle {
+    display: block; width: 100%; padding: 12px; margin-bottom: 16px;
+    background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--r-sm);
+    color: var(--info); font-size: .82rem; font-weight: 700; cursor: pointer; font-family: inherit;
+  }
+  .mobile-collapsed .dash-detail { display: none; }
+}

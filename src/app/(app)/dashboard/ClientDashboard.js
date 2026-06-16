@@ -41,6 +41,7 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
   const [currentMonth, setCurrentMonth] = useState(0)
   const [realMonth, setRealMonth] = useState(0) // mês de hoje; abas só mostram daqui pra frente
   const [selectedCat, setSelectedCat] = useState(null) // categoria aberta no drilldown
+  const [showDetails, setShowDetails] = useState(false) // no mobile, esconde gráficos/detalhes atrás de "Ver detalhes"
 
   useEffect(() => {
     const t = new Date()
@@ -110,7 +111,7 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
   }, [currentMetric])
 
   return (
-    <div className="page anim">
+    <div className={`page anim ${showDetails ? '' : 'mobile-collapsed'}`}>
       <header className="app-topbar">
         <div>
           <h1 className="page-title">{currentMetric.monthName} <span className="page-title-year">2026</span></h1>
@@ -132,8 +133,20 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
         ))}
       </div>
 
+      {/* Resumo essencial (só mobile) + alternar detalhes */}
+      <div className="mobile-summary">
+        {currentMetric.isCurrent && (
+          <div className="ms-item"><span>Grana atual</span><strong className="ms-pos">{formatCurrency(currentMetric.saldoAtual)}</strong></div>
+        )}
+        <div className="ms-item"><span>Falta pagar</span><strong className="ms-warn">{formatCurrency(currentMetric.pendingPay)}</strong></div>
+        <div className="ms-item"><span>Saldo fim do mês</span><strong style={{ color: currentMetric.balance >= 0 ? 'var(--pos)' : 'var(--neg)' }}>{formatCurrency(currentMetric.balance)}</strong></div>
+      </div>
+      <button className="dash-details-toggle" onClick={() => setShowDetails(v => !v)}>
+        {showDetails ? 'Ocultar detalhes ▲' : 'Ver detalhes (gráficos, linha do tempo) ▼'}
+      </button>
+
       {/* Resumo anual */}
-      <div className="annual-strip">
+      <div className="annual-strip dash-detail">
         <div className="annual-item">
           <span>Saldo projetado em Dezembro</span>
           <strong style={{ color: lastBalance >= 0 ? 'var(--pos)' : 'var(--neg)' }}>{formatCurrency(lastBalance)}</strong>
@@ -145,7 +158,7 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
         </div>
       </div>
 
-      <section className="kpi-grid">
+      <section className="kpi-grid dash-detail">
         <div className="kpi-card" style={{ '--kpi-accent': 'var(--pos)' }}>
           <div className="kpi-label">Total de entradas</div>
           <div className="kpi-value" style={{ color: 'var(--pos)' }}>{formatCurrency(currentMetric.totalIn)}</div>
@@ -169,7 +182,7 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
       </section>
 
       {hasData && (
-        <section className="dash-grid">
+        <section className="dash-grid dash-detail">
           <div className="card chart-card">
             <div className="card-body">
               <div className="timeline-title">Tendência do saldo — Abril a Dezembro</div>
@@ -260,7 +273,7 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
         </section>
       )}
 
-      <section className="timeline-card">
+      <section className="timeline-card dash-detail">
         <div className="timeline-head">
           <div className="timeline-title" style={{ marginBottom: 0 }}>Linha do tempo — {currentMetric.monthName}</div>
           {currentMetric.isCurrent && todayDay && <span className="today-chip">Hoje · dia {todayDay}</span>}
@@ -330,7 +343,7 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
       )}
 
       {hasData && (
-        <section className="month-panel">
+        <section className="month-panel dash-detail">
           <div>
             <div className="card">
               <div className="card-header">
