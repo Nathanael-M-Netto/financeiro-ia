@@ -85,7 +85,9 @@ export function computeAll(expenses = [], extraIncome = [], today = null) {
           ? 'Juros/Multa'
           : exp.description || `Fatura ${MONTHS_NAMES[start_month]}`
 
+        const isPaid = exp.paid_through != null && m <= exp.paid_through
         return {
+          id: exp.id,
           cardId: exp.card,
           cardName: c_name,
           desc,
@@ -94,7 +96,9 @@ export function computeAll(expenses = [], extraIncome = [], today = null) {
           payDay: exp.pay_day || CARD_META[exp.card]?.payDay || 10,
           isNubank: exp.card === 'nubank',
           isFee: !!exp.is_fee,
-          category: exp.category || null
+          category: exp.category || null,
+          isPaid,
+          paidThrough: exp.paid_through ?? null
         }
       }
       return null
@@ -111,21 +115,23 @@ export function computeAll(expenses = [], extraIncome = [], today = null) {
     const ctx = { monthIdx: m, todayMid, currentMonthIdx, inRange }
     const timelineEvents = buildTimelineEvents(incomeThisMonth, activeExpenses, ctx)
 
-    // Resumo de pagamentos do mês (a partir do status dos eventos)
-    let pendingPay = 0, passedPay = 0, overdueAmount = 0, overdueCharge = 0
-    timelineEvents.forEach(ev => {
-      if (ev.type === 'expense' || ev.type === 'late') {
-        if (ev.status === 'past') {
-          passedPay += ev.amount
-          if (m === currentMonthIdx) {
-            overdueAmount += ev.amount
-            overdueCharge += ev.lateEstimate || 0
-          }
-        } else {
-          pendingPay += ev.amount
+    // Resumo de pagamentos do mês — considera o status de pago de cada despesa.
+    // paidOut = já pago (saiu da conta) · unpaidOut = ainda a pagar.
+    let paidOut = 0, unpaidOut = 0, overdueAmount = 0, overdueCharge = 0
+    activeExpenses.forEach(e => {
+      if (e.isPaid) { paidOut += e.amount; return }
+      unpaidOut += e.amount
+      if (m === currentMonthIdx && todayMid) {
+        const evDate = dateForMonthDay(m, e.payDay)
+        if (evDate < todayMid) {
+          overdueAmount += e.amount
+          const daysLate = Math.max(0, Math.round((todayMid - evDate) / 86400000))
+          overdueCharge += computeLateCharge(e.amount, daysLate).charge
         }
       }
     })
+    const pendingPay = unpaidOut          // falta pagar = tudo que não está pago
+    const saldoAtual = totalIncome - paidOut // dinheiro que você tem agora (só o pago saiu)
 
     metrics.push({
       idx: m,
@@ -141,9 +147,11 @@ export function computeAll(expenses = [], extraIncome = [], today = null) {
       alerts,
       timelineEvents,
       pendingPay,
-      passedPay,
       overdueAmount,
       overdueCharge,
+      paidOut,
+      unpaidOut,
+      saldoAtual,
     })
 
     carryover = balance
@@ -227,7 +235,7 @@ function buildTimelineEvents(incomeList, activeExpenses, ctx) {
     })
   })
 
-  // Agrupa despesas do mesmo cartão/dia para não poluir a UI
+  // Agrupa despesas do mesmo cartão/dia para não poluir a UI (rastreando o pago)
   const groupedCards = {}
   activeExpenses.forEach(exp => {
     const key = `${exp.cardName}-${exp.payDay}`
@@ -237,10 +245,12 @@ function buildTimelineEvents(incomeList, activeExpenses, ctx) {
         day: exp.payDay,
         label: exp.cardName,
         amount: 0,
+        unpaidAmt: 0,
         hasFee: false
       }
     }
     groupedCards[key].amount += exp.amount
+    if (!exp.isPaid) groupedCards[key].unpaidAmt += exp.amount
     if (exp.isFee) {
       groupedCards[key].hasFee = true
       groupedCards[key].type = 'late'
@@ -253,18 +263,21 @@ function buildTimelineEvents(incomeList, activeExpenses, ctx) {
       day: g.day,
       label: g.label,
       amount: g.amount,
+      unpaidAmt: g.unpaidAmt,
+      fullyPaid: g.amount > 0 && g.unpaidAmt === 0,
       lateLabel: g.hasFee ? 'Atraso embutido' : null
     })
   })
 
-  // Status relativo a hoje + estimativa de encargos para o que já venceu neste mês
+  // Status relativo a hoje. Item pago => 'paid' (sem encargo). Encargo só no não-pago.
   events.forEach(ev => {
+    if (ev.fullyPaid) { ev.status = 'paid'; return }
     ev.status = eventStatus(ctx, ev.day)
     if ((ev.type === 'expense' || ev.type === 'late') && ev.status === 'past' && ctx.monthIdx === ctx.currentMonthIdx) {
       const evDate = dateForMonthDay(ctx.monthIdx, ev.day)
       const daysLate = Math.max(0, Math.round((ctx.todayMid - evDate) / 86400000))
       ev.daysLate = daysLate
-      ev.lateEstimate = computeLateCharge(ev.amount, daysLate).charge
+      ev.lateEstimate = computeLateCharge(ev.unpaidAmt ?? ev.amount, daysLate).charge
     }
   })
 

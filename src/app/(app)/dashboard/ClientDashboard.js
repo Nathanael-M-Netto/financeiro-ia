@@ -1,7 +1,9 @@
 'use client'
 
 import React, { useState, useMemo, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { computeAll, formatCurrency, monthIdxForDate } from '@/lib/finance-engine'
+import { createClient } from '@/lib/supabase-browser'
 import { CARD_META } from '@/lib/constants'
 import { CATEGORY_META } from '@/lib/categorize'
 import { IconChevronLeft, IconChevronRight, IconAlert, IconCheck } from '@/lib/icons'
@@ -59,6 +61,20 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
   const lastBalance = metrics[metrics.length - 1].balance
   const negativeMonths = metrics.filter(m => m.balance < 0).length
   const hasData = initialExpenses.length > 0 || initialIncome.length > 0
+
+  const router = useRouter()
+  const supabase = createClient()
+  const [paidBusy, setPaidBusy] = useState(false)
+
+  // Marca/desmarca uma despesa como paga no mês visualizado (paid_through).
+  const togglePaid = async (item) => {
+    if (paidBusy || !item.id) return
+    setPaidBusy(true)
+    const newVal = item.isPaid ? (currentMonth > 0 ? currentMonth - 1 : null) : currentMonth
+    await supabase.from('expenses').update({ paid_through: newVal }).eq('id', item.id)
+    router.refresh()
+    setPaidBusy(false)
+  }
 
   const alertIcon = (type) => (type === 'pos' ? <IconCheck size={16} /> : <IconAlert size={16} />)
 
@@ -261,6 +277,7 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
                   <div className="tl-day">DIA {ev.day}</div>
                   <div className="tl-label">{ev.label}</div>
                   <div className={`tl-amount ${ev.type}`}>{formatCurrency(ev.amount)}</div>
+                  {ev.status === 'paid' && isOut && <span className="tl-tag tl-tag-paid">✓ pago</span>}
                   {ev.status === 'today' && <span className="tl-tag tl-tag-today">vence hoje</span>}
                   {ev.status === 'upcoming' && isOut && <span className="tl-tag tl-tag-up">a vencer</span>}
                   {ev.status === 'past' && isOut && ev.daysLate > 0 && <span className="tl-tag tl-tag-past">venceu há {ev.daysLate}d</span>}
@@ -341,14 +358,20 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
                             <th>Descrição</th>
                             <th className="align-center" style={{ textAlign: 'center' }}>Parcela</th>
                             <th className="align-right">Valor</th>
+                            <th className="align-center" style={{ textAlign: 'center' }}>Pago</th>
                           </tr>
                         </thead>
                         <tbody>
                           {cardItems.map((item, idx) => (
-                            <tr key={idx}>
+                            <tr key={idx} className={item.isPaid ? 'row-paid' : ''}>
                               <td>{item.desc}</td>
                               <td style={{ textAlign: 'center' }}><span className="inst-badge">{item.instStr}</span></td>
                               <td className="amt-col">{formatCurrency(item.amount)}</td>
+                              <td style={{ textAlign: 'center' }}>
+                                <button className={`pay-toggle ${item.isPaid ? 'on' : ''}`} onClick={() => togglePaid(item)} disabled={paidBusy} aria-label={item.isPaid ? 'Desmarcar pago' : 'Marcar como pago'} title={item.isPaid ? 'Pago — clique para desmarcar' : 'Marcar como pago'}>
+                                  {item.isPaid ? <IconCheck size={13} /> : ''}
+                                </button>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -364,6 +387,15 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
           </div>
 
           <div className="summary-col">
+            {currentMetric.isCurrent && (
+              <div className="saldo-atual">
+                <div className="hero-label">Grana atual — agora</div>
+                <div className="saldo-atual-val">{formatCurrency(currentMetric.saldoAtual)}</div>
+                {currentMetric.pendingPay > 0
+                  ? <div className="saldo-atual-sub">Ainda falta pagar {formatCurrency(currentMetric.pendingPay)} este mês</div>
+                  : <div className="saldo-atual-sub ok">Tudo deste mês está pago</div>}
+              </div>
+            )}
             <div className={`balance-hero ${currentMetric.balance >= 0 ? 'positive' : 'negative'}`}>
               <div className="hero-label">Saldo efetivo — fim do mês</div>
               <div className={`hero-value ${currentMetric.balance >= 0 ? 'hero-positive' : 'hero-negative'}`}>{formatCurrency(currentMetric.balance)}</div>

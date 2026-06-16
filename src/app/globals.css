@@ -1329,3 +1329,24 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 /* "Ver análise" com cara de botão nos cartões */
 .card-tile-analyze { background: var(--info-dim); border: 1px solid rgba(77,131,255,.3); padding: 4px 11px; border-radius: var(--r-sm); }
 .card-tile-analyze:hover { background: rgba(77,131,255,.2); text-decoration: none; }
+
+/* ═══════════════════════════════════════
+   Status de "pago" + grana atual
+═══════════════════════════════════════ */
+.pay-toggle {
+  width: 22px; height: 22px; border-radius: 6px; border: 1.5px solid var(--border2);
+  background: transparent; color: var(--pos); cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; transition: border-color .15s, background .15s;
+}
+.pay-toggle:hover:not(:disabled) { border-color: var(--pos); }
+.pay-toggle.on { background: var(--pos); border-color: var(--pos); color: #06281f; }
+.pay-toggle:disabled { opacity: .5; cursor: default; }
+.row-paid td:not(:last-child) { opacity: .5; text-decoration: line-through; }
+
+.tl-ev.st-paid { opacity: .55; }
+.tl-tag-paid { background: var(--pos-dim); color: var(--pos); }
+
+.saldo-atual { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 18px 20px; margin-bottom: 14px; }
+.saldo-atual-val { font-size: 1.7rem; font-weight: 800; font-family: var(--font-mono); letter-spacing: -.02em; color: var(--text); margin-top: 4px; }
+.saldo-atual-sub { font-size: .72rem; color: var(--warn); margin-top: 6px; font-weight: 600; }
+.saldo-atual-sub.ok { color: var(--pos); }
