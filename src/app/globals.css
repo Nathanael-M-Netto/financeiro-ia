@@ -1292,3 +1292,12 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 .hist-neg { color: var(--neg); }
 .hist-bal { border-top: 1px solid var(--border); padding-top: 9px; margin-top: 2px; }
 .hist-empty { font-size: .8rem; color: var(--text3); font-style: italic; padding: 8px 0; }
+
+/* ═══════════════════════════════════════
+   Chat input — sem corte/scroll, respiro no rodapé
+═══════════════════════════════════════ */
+.chat-input { min-height: 48px; line-height: 1.45; overflow-y: auto; }
+.chat-input-bar { padding: 14px 6px max(18px, env(safe-area-inset-bottom)); }
+@media (max-width: 900px) {
+  .chat-input-bar { padding: 12px 12px max(22px, calc(env(safe-area-inset-bottom) + 8px)); }
+}

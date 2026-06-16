@@ -185,7 +185,7 @@ export default function ChatClient({ initialMessages, userId, userName }) {
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Escreva sua mensagem… (Enter envia, Shift+Enter quebra linha)"
+          placeholder="Escreva sua mensagem…"
           disabled={sending}
         />
         <button className="chat-send" onClick={() => send()} disabled={sending || input.trim().length < 2} aria-label="Enviar">
