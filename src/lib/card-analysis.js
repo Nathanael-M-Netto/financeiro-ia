@@ -1,9 +1,9 @@
-import { MONTHS_NAMES } from './constants'
+import { MONTHS_NAMES, HORIZON } from './constants'
 
 /**
  * Análise por cartão. Trabalha sobre as despesas (planos de parcelamento) e os
- * cartões do usuário, projetando os 9 meses (Abril–Dezembro), no mesmo frame do
- * resto do app. currentMonth = 0 (Abril) por padrão.
+ * cartões do usuário, projetando o horizonte (Abril/2026 a Dezembro/2027), no
+ * mesmo frame do resto do app. currentMonth = 0 (Abril) por padrão.
  */
 
 // Casa uma despesa a um cartão por card_id (novo) OU pela chave de texto legada.
@@ -12,15 +12,15 @@ function expenseBelongsToCard(exp, card) {
   return exp.card === card.key
 }
 
-// Valor da fatura do cartão em cada um dos 9 meses.
+// Valor da fatura do cartão em cada mês do horizonte.
 function monthlyInvoices(expenses, card) {
-  const months = new Array(9).fill(0)
+  const months = new Array(HORIZON).fill(0)
   for (const exp of expenses) {
     if (!expenseBelongsToCard(exp, card)) continue
     const start = exp.start_month || 0
     const total = exp.total_installments || 1
     const amount = parseFloat(exp.amount) || 0
-    for (let m = Math.max(0, start); m < start + total && m < 9; m++) {
+    for (let m = Math.max(0, start); m < start + total && m < HORIZON; m++) {
       months[m] += amount
     }
   }
@@ -41,7 +41,7 @@ export function analyzeCard(expenses, card, currentMonth = 0) {
 
   // Total ainda a pagar do mês atual em diante.
   let remaining = 0
-  for (let m = currentMonth; m < 9; m++) remaining += months[m]
+  for (let m = currentMonth; m < HORIZON; m++) remaining += months[m]
 
   // Planos (não-juros) com parcela em aberto do mês atual em diante.
   const openPlans = cardExpenses.filter(e => {

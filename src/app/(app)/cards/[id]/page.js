@@ -88,9 +88,10 @@ export default async function CardDetailPage({ params }) {
       {/* Gráfico mensal */}
       <section className="card" style={{ marginBottom: '22px' }}>
         <div className="card-body">
-          <div className="timeline-title">Fatura por mês — Abril a Dezembro</div>
+          <div className="timeline-title">Fatura por mês — próximos meses</div>
           <div className="month-chart">
-            {a.months.map((v, i) => {
+            {a.months.slice(currentMonthIdx, currentMonthIdx + 12).map((v, j) => {
+              const i = currentMonthIdx + j
               const h = v === 0 ? 0 : Math.max(6, Math.round((v / (a.peakInvoice || 1)) * 100))
               const isPeak = i === a.peakMonthIdx && v > 0
               return (

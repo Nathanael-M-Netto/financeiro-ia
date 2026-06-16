@@ -1,18 +1,16 @@
-import { MONTHS_NAMES, CARD_META, BASE_YEAR, BASE_MONTH } from './constants'
+import { MONTHS_NAMES, CARD_META, BASE_YEAR, BASE_MONTH, HORIZON } from './constants'
 
 /**
  * Motor financeiro genérico.
- * Recebe despesas e receitas do Supabase e projeta os 9 meses (Abril-Dezembro).
+ * Recebe despesas e receitas do Supabase e projeta o horizonte (Abril/2026 a Dezembro/2027).
  * Quando `today` é informado, calcula a posição de cada evento em relação a hoje
  * (vencido / vence hoje / a vencer) e estima encargos de atraso.
  */
 
-// Índice do mês (0 = Abril … 8 = Dezembro) para uma data real.
+// Índice do mês (0 = Abril/2026 … 20 = Dezembro/2027) para uma data real.
 export function monthIdxForDate(date = new Date()) {
-  const y = date.getFullYear()
-  if (y < BASE_YEAR) return 0
-  if (y > BASE_YEAR) return 8
-  return Math.max(0, Math.min(8, date.getMonth() - BASE_MONTH))
+  const idx = (date.getFullYear() - BASE_YEAR) * 12 + (date.getMonth() - BASE_MONTH)
+  return Math.max(0, Math.min(HORIZON - 1, idx))
 }
 
 // Data real (00:00) de um evento no mês `monthIdx`, dia `day`.
@@ -40,15 +38,14 @@ export function computeLateCharge(amount, daysLate) {
 export function computeAll(expenses = [], extraIncome = [], today = null) {
   const hasToday = today instanceof Date && !isNaN(today)
   const todayMid = hasToday ? startOfDay(today) : null
-  const inRange = hasToday &&
-    today.getFullYear() === BASE_YEAR &&
-    today.getMonth() >= BASE_MONTH && today.getMonth() <= BASE_MONTH + 8
-  const currentMonthIdx = inRange ? monthIdxForDate(today) : -1
+  const rawIdx = hasToday ? (today.getFullYear() - BASE_YEAR) * 12 + (today.getMonth() - BASE_MONTH) : -1
+  const inRange = hasToday && rawIdx >= 0 && rawIdx <= HORIZON - 1
+  const currentMonthIdx = inRange ? rawIdx : -1
 
   let carryover = 0
   const metrics = []
 
-  for (let m = 0; m < 9; m++) {
+  for (let m = 0; m < HORIZON; m++) {
     const monthName = MONTHS_NAMES[m]
 
     // Receitas do mês (vindas do banco)

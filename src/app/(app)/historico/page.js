@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase-server'
 import { redirect } from 'next/navigation'
 import { computeAll, formatCurrency, monthIdxForDate } from '@/lib/finance-engine'
+import { monthBaseName, monthYear } from '@/lib/constants'
 
 export default async function HistoricoPage() {
   const supabase = await createClient()
@@ -38,7 +39,7 @@ export default async function HistoricoPage() {
             return (
               <div key={m.idx} className="card hist-card">
                 <div className="card-body">
-                  <div className="hist-month">{m.monthName} <span className="page-title-year">2026</span></div>
+                  <div className="hist-month">{monthBaseName(m.idx)} <span className="page-title-year">{monthYear(m.idx)}</span></div>
                   {vazio ? (
                     <div className="hist-empty">Sem movimento</div>
                   ) : (

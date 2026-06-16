@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
-import { MONTHS_NAMES, CARD_META } from '@/lib/constants' // Make sure constants are correctly exported
+import { MONTHS_NAMES, CARD_META, HORIZON } from '@/lib/constants' // Make sure constants are correctly exported
+import { monthIdxForDate } from '@/lib/finance-engine'
 import { categorize } from '@/lib/categorize'
 
 const GEMINI_MODELS = [
@@ -64,9 +65,9 @@ ${expenses && expenses.length > 0 ? expenses.map(e => `- ID: [${e.id}] | Descri�
 CARTÕES DO USUÁRIO (use a chave em "cartao"):
 ${cards && cards.length > 0 ? cards.map(c => `- ${c.name} (chave: ${c.key || c.name.toLowerCase()})`).join('\n') : "Nenhum cartão cadastrado ainda."}
 ---
-MESES DE REFERÊNCIA (Índices válidos):
-0=Abril, 1=Maio, 2=Junho, 3=Julho, 4=Agosto, 5=Setembro, 6=Outubro, 7=Novembro, 8=Dezembro
-Atual Mês Corrente (se não especificado): Abril (0)
+MESES DE REFERÊNCIA (Índices válidos de 0 a ${HORIZON - 1}):
+${MONTHS_NAMES.map((nm, i) => `${i}=${nm}`).join(', ')}
+Atual Mês Corrente (se não especificado): ${MONTHS_NAMES[monthIdxForDate(new Date())]} (${monthIdxForDate(new Date())})
 `;
 
     const SYSTEM_PROMPT = `Você é um Agente Financeiro Avançado (FinDash AI). Você tem liberdade quase total para ler, organizar, excluir, adicionar e analisar a conta do usuário.
@@ -115,7 +116,7 @@ FORMATO ESTRITO DO JSON:
 REGRAS:
 1. Retorne APENAS a string formatada em JSON ARRAY puro.
 2. Seja inteligente: Se o usuário pedir um cálculo de juros caso ele atrase, explique na "mensagem", e SE ele pedir para adicionar, crie a ação "inserir_despesa" com is_fee: true.
-3. Use os índices descritos (0 a 8) para mes_inicio_idx.
+3. Use os índices descritos (0 a ${HORIZON - 1}) para mes_inicio_idx.
 4. "meses_recorrente" deve ser no mínimo 1. Para meses seguintes use o suficiente (ex: maio a dezembro = 8 meses).
 5. Certifique as opções de cartões permitidas: "nubank", "will", "havan", "amazon", "mercadopago", "fixa", "extra".
 
@@ -210,7 +211,7 @@ DADOS DE CONTEXTO ESTÃO ANEXADOS AO COMANDO DO USUÁRIO.`;
             user_id: user.id,
             description: act.descricao || 'Despesa',
             amount: amountVal,
-            start_month: Math.min(8, Math.max(0, parseInt(act.mes_inicio_idx) || 0)),
+            start_month: Math.min(HORIZON - 1, Math.max(0, parseInt(act.mes_inicio_idx) || 0)),
             total_installments: Math.min(360, Math.max(1, parseInt(act.parcelas) || 1)),
             card: cardKey,
             card_id: cardIdByKey[String(cardKey).toLowerCase()] || null,
@@ -229,7 +230,7 @@ DADOS DE CONTEXTO ESTÃO ANEXADOS AO COMANDO DO USUÁRIO.`;
             user_id: user.id,
             description: act.descricao || 'Receita',
             amount: amountVal,
-            start_month: Math.min(8, Math.max(0, parseInt(act.mes_inicio_idx) || 0)),
+            start_month: Math.min(HORIZON - 1, Math.max(0, parseInt(act.mes_inicio_idx) || 0)),
             total_months: Math.min(360, Math.max(1, parseInt(act.meses_recorrente) || 1)),
             pay_day: Math.min(31, Math.max(1, parseInt(act.dia_pagamento) || 5)),
             source: 'ai'

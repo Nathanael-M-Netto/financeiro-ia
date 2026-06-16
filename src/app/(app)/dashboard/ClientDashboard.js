@@ -4,7 +4,10 @@ import React, { useState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { computeAll, formatCurrency, monthIdxForDate } from '@/lib/finance-engine'
 import { createClient } from '@/lib/supabase-browser'
-import { CARD_META } from '@/lib/constants'
+import { CARD_META, HORIZON, monthBaseName, monthYear } from '@/lib/constants'
+
+// Quantos meses mostrar a partir do mês atual (janela rolante).
+const WINDOW = 12
 import { CATEGORY_META } from '@/lib/categorize'
 import { IconChevronLeft, IconChevronRight, IconAlert, IconCheck } from '@/lib/icons'
 
@@ -59,8 +62,16 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
   )
   const currentMetric = metrics[currentMonth]
   const todayDay = today ? today.getDate() : null
-  const lastBalance = metrics[metrics.length - 1].balance
-  const negativeMonths = metrics.filter(m => m.balance < 0).length
+
+  // Janela rolante: do mês atual em diante, no máximo WINDOW meses.
+  const windowMetrics = useMemo(
+    () => metrics.filter(m => m.idx >= realMonth).slice(0, WINDOW),
+    [metrics, realMonth]
+  )
+  const lastWindow = windowMetrics[windowMetrics.length - 1] || metrics[metrics.length - 1]
+  const windowEndIdx = lastWindow.idx
+  const lastBalance = lastWindow.balance
+  const negativeMonths = windowMetrics.filter(m => m.balance < 0).length
   const hasData = initialExpenses.length > 0 || initialIncome.length > 0
 
   const router = useRouter()
@@ -79,10 +90,10 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
 
   const alertIcon = (type) => (type === 'pos' ? <IconCheck size={16} /> : <IconAlert size={16} />)
 
-  // Escala do gráfico de tendência (maior saldo absoluto entre os 9 meses).
+  // Escala do gráfico de tendência (maior saldo absoluto na janela visível).
   const trendMaxAbs = useMemo(
-    () => Math.max(1, ...metrics.map(m => Math.abs(m.balance))),
-    [metrics]
+    () => Math.max(1, ...windowMetrics.map(m => Math.abs(m.balance))),
+    [windowMetrics]
   )
 
   // Gastos agrupados por cartão no mês selecionado.
@@ -114,18 +125,18 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
     <div className={`page anim ${showDetails ? '' : 'mobile-collapsed'}`}>
       <header className="app-topbar">
         <div>
-          <h1 className="page-title">{currentMetric.monthName} <span className="page-title-year">2026</span></h1>
+          <h1 className="page-title">{monthBaseName(currentMonth)} <span className="page-title-year">{monthYear(currentMonth)}</span></h1>
           <p className="page-sub">Sua projeção financeira do mês</p>
         </div>
         <div className="month-stepper">
           <button className="icon-btn-sq" disabled={currentMonth <= realMonth} onClick={() => setCurrentMonth(m => Math.max(realMonth, m - 1))} aria-label="Mês anterior"><IconChevronLeft size={18} /></button>
-          <button className="icon-btn-sq" disabled={currentMonth === 8} onClick={() => setCurrentMonth(m => Math.min(8, m + 1))} aria-label="Próximo mês"><IconChevronRight size={18} /></button>
+          <button className="icon-btn-sq" disabled={currentMonth >= windowEndIdx} onClick={() => setCurrentMonth(m => Math.min(windowEndIdx, m + 1))} aria-label="Próximo mês"><IconChevronRight size={18} /></button>
         </div>
       </header>
 
       {/* Seletor de meses em abas */}
       <div className="month-tabs">
-        {metrics.filter(m => m.idx >= realMonth).map((m) => (
+        {windowMetrics.map((m) => (
           <button key={m.idx} className={`month-tab ${currentMonth === m.idx ? 'active' : ''} ${m.isCurrent ? 'is-current' : ''}`} onClick={() => setCurrentMonth(m.idx)}>
             <span className="month-tab-name">{m.monthName}{m.isCurrent && <span className="month-tab-today">hoje</span>}</span>
             <span className="month-tab-bal" style={{ color: m.balance >= 0 ? 'var(--pos)' : 'var(--neg)' }}>{formatCurrency(m.balance)}</span>
@@ -148,7 +159,7 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
       {/* Resumo anual */}
       <div className="annual-strip dash-detail">
         <div className="annual-item">
-          <span>Saldo projetado em Dezembro</span>
+          <span>Saldo projetado em {lastWindow.monthName}</span>
           <strong style={{ color: lastBalance >= 0 ? 'var(--pos)' : 'var(--neg)' }}>{formatCurrency(lastBalance)}</strong>
         </div>
         <div className="annual-divider" />
@@ -185,18 +196,18 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
         <section className="dash-grid dash-detail">
           <div className="card chart-card">
             <div className="card-body">
-              <div className="timeline-title">Tendência do saldo — Abril a Dezembro</div>
+              <div className="timeline-title">Tendência do saldo — próximos {windowMetrics.length} meses</div>
               <div className="trend-chart">
-                {metrics.map((m, i) => {
+                {windowMetrics.map((m) => {
                   const v = m.balance
                   const h = Math.round((Math.abs(v) / trendMaxAbs) * 100)
                   const pos = v >= 0
                   return (
-                    <button key={i} className={`trend-col ${currentMonth === i ? 'active' : ''}`} onClick={() => setCurrentMonth(i)} title={`${m.monthName}: ${formatCurrency(v)}`}>
+                    <button key={m.idx} className={`trend-col ${currentMonth === m.idx ? 'active' : ''}`} onClick={() => setCurrentMonth(m.idx)} title={`${m.monthName}: ${formatCurrency(v)}`}>
                       <div className="trend-top"><div className="trend-bar pos" style={{ height: pos ? `${h}%` : '0%' }} /></div>
                       <div className="trend-mid" />
                       <div className="trend-bot"><div className="trend-bar neg" style={{ height: !pos ? `${h}%` : '0%' }} /></div>
-                      <span className="trend-lbl">{m.monthName.slice(0, 3)}</span>
+                      <span className="trend-lbl">{monthBaseName(m.idx).slice(0, 3)}</span>
                     </button>
                   )
                 })}

@@ -1,15 +1,38 @@
-export const MONTHS_NAMES = [
-  'Abril', 'Maio', 'Junho', 'Julho',
-  'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+// Nomes dos 12 meses do ano (Janeiro = 0).
+const PT_FULL = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
 ];
 
-// O período projetado vai de Abril a Dezembro de 2026.
-// Usado para mapear o índice do mês (0–8) para uma data real do calendário.
+// A projeção começa em Abril/2026 (índice 0) e cobre 21 meses, indo até
+// Dezembro/2027. Assim o app continua funcionando quando o ano virar.
 export const BASE_YEAR = 2026;
 export const BASE_MONTH = 3; // Abril (Janeiro = 0)
+export const HORIZON = 21;   // Abril/2026 … Dezembro/2027
 
+// Data (dia 1) do mês de índice m (0 = Abril/2026).
+export function monthDate(m) { return new Date(BASE_YEAR, BASE_MONTH + (m || 0), 1); }
+
+// Só o nome do mês (sem ano). Ex.: 0 → "Abril", 9 → "Janeiro".
+export function monthBaseName(m) { return PT_FULL[monthDate(m).getMonth()]; }
+
+// Ano do mês de índice m.
+export function monthYear(m) { return monthDate(m).getFullYear(); }
+
+// Nome do mês com o ano só quando for diferente do ano-base (2026).
+// Ex.: 2 → "Junho", 9 → "Janeiro 2027".
+export function monthName(m) {
+  const y = monthYear(m);
+  return y === BASE_YEAR ? monthBaseName(m) : `${monthBaseName(m)} ${y}`;
+}
+
+// MONTHS_NAMES[m] continua funcionando; agora cobre os 21 meses do horizonte
+// (com o ano embutido nos meses de 2027).
+export const MONTHS_NAMES = Array.from({ length: HORIZON }, (_, m) => monthName(m));
+
+// Mapa nome→índice apenas dos meses-base de 2026 (Abril..Dezembro = 0..8).
 export const MONTH_MAP = Object.fromEntries(
-  MONTHS_NAMES.map((name, i) => [name.toLowerCase(), i])
+  Array.from({ length: 9 }, (_, i) => [PT_FULL[BASE_MONTH + i].toLowerCase(), i])
 );
 
 export const CARD_META = {
