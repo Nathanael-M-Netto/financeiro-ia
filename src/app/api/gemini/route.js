@@ -2,8 +2,17 @@ import { NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { MONTHS_NAMES, CARD_META, HORIZON } from '@/lib/constants' // Make sure constants are correctly exported
-import { monthIdxForDate } from '@/lib/finance-engine'
+import { monthIdxForDate, invoiceSlotForPurchase } from '@/lib/finance-engine'
 import { categorize } from '@/lib/categorize'
+
+// Converte 'YYYY-MM-DD' (ou parecido) em Date local; null se inválida.
+function parseDateSafe(s) {
+  if (!s) return null
+  const m = String(s).match(/(\d{4})-(\d{1,2})-(\d{1,2})/)
+  if (!m) return null
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  return isNaN(d) ? null : d
+}
 
 const GEMINI_MODELS = [
   { id: 'gemini-3.1-flash-lite-preview', label: 'Gemini 3.1 Flash Lite' },
@@ -43,7 +52,7 @@ export async function POST(req) {
     // 2. Fetch User Data
     const { data: expenses } = await supabase.from('expenses').select('*').eq('user_id', user.id)
     const { data: extraIncome } = await supabase.from('extra_income').select('*').eq('user_id', user.id)
-    const { data: cards } = await supabase.from('cards').select('id, key, name').eq('user_id', user.id)
+    const { data: cards } = await supabase.from('cards').select('id, key, name, closing_day, due_day').eq('user_id', user.id)
 
     // Mapa para resolver o card_id a partir da chave/nome que a IA usar.
     const cardIdByKey = {}
@@ -63,11 +72,12 @@ DESPESAS:
 ${expenses && expenses.length > 0 ? expenses.map(e => `- ID: [${e.id}] | Descrição: ${e.description} | Cartão: ${e.card} | R$${e.amount} | Mês Início: ${e.start_month} (${MONTHS_NAMES[e.start_month]}) | Parcelas: ${e.total_installments} | Vencimento: Dia ${e.pay_day || 5} | Taxa/Juros: ${e.is_fee}`).join('\n') : "Nenhuma despesa cadastrada."}
 ---
 CARTÕES DO USUÁRIO (use a chave em "cartao"):
-${cards && cards.length > 0 ? cards.map(c => `- ${c.name} (chave: ${c.key || c.name.toLowerCase()})`).join('\n') : "Nenhum cartão cadastrado ainda."}
+${cards && cards.length > 0 ? cards.map(c => `- ${c.name} (chave: ${c.key || c.name.toLowerCase()}) — fecha dia ${c.closing_day ?? '?'}, vence dia ${c.due_day ?? '?'}`).join('\n') : "Nenhum cartão cadastrado ainda."}
 ---
+HOJE é ${new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })} (${new Date().toISOString().slice(0, 10)}).
 MESES DE REFERÊNCIA (Índices válidos de 0 a ${HORIZON - 1}):
 ${MONTHS_NAMES.map((nm, i) => `${i}=${nm}`).join(', ')}
-Atual Mês Corrente (se não especificado): ${MONTHS_NAMES[monthIdxForDate(new Date())]} (${monthIdxForDate(new Date())})
+Mês corrente: ${MONTHS_NAMES[monthIdxForDate(new Date())]} (${monthIdxForDate(new Date())})
 `;
 
     const SYSTEM_PROMPT = `Você é um Agente Financeiro Avançado (FinDash AI). Você tem liberdade quase total para ler, organizar, excluir, adicionar e analisar a conta do usuário.
@@ -87,21 +97,19 @@ FORMATO ESTRITO DO JSON:
   },
   {
     "acao": "inserir_despesa",
-    "descricao": "Fatura X",
+    "descricao": "Mercado",
     "valor": 150.50,
     "cartao": "nubank",
     "parcelas": 1,
-    "mes_inicio_idx": 1,
-    "dia_vencimento": 5,
+    "data_compra": "2026-06-17",
     "is_fee": false
   },
   {
     "acao": "inserir_receita",
     "descricao": "Salário",
     "valor": 2000,
-    "mes_inicio_idx": 0,
-    "meses_recorrente": 8,
-    "dia_pagamento": 5
+    "data_inicio": "2026-06-05",
+    "meses_recorrente": 8
   },
   {
     "acao": "apagar_despesa",
@@ -114,11 +122,12 @@ FORMATO ESTRITO DO JSON:
 ]
 
 REGRAS:
-1. Retorne APENAS a string formatada em JSON ARRAY puro.
-2. Seja inteligente: Se o usuário pedir um cálculo de juros caso ele atrase, explique na "mensagem", e SE ele pedir para adicionar, crie a ação "inserir_despesa" com is_fee: true.
-3. Use os índices descritos (0 a ${HORIZON - 1}) para mes_inicio_idx.
-4. "meses_recorrente" deve ser no mínimo 1. Para meses seguintes use o suficiente (ex: maio a dezembro = 8 meses).
-5. Certifique as opções de cartões permitidas: "nubank", "will", "havan", "amazon", "mercadopago", "fixa", "extra".
+1. Retorne APENAS a string formatada em JSON ARRAY puro (sem comentários).
+2. DATAS (muito importante): em despesa use "data_compra" e em receita use "data_inicio", no formato YYYY-MM-DD. NÃO calcule mês de fatura nem dia de vencimento — o sistema calcula isso a partir da data e do cartão. Interprete expressões em relação a HOJE (ex.: "ontem", "dia 5", "semana passada", "mês que vem"). Se a data não for dita, use HOJE.
+3. À VISTA — REGRA DE OURO: Pix, dinheiro, débito, OU quando o usuário NÃO citar um cartão de crédito específico → use SEMPRE "cartao": "extra". NUNCA use "fixa" para esses casos. ("fixa" = apenas contas fixas mensais tipo aluguel/internet no cartão "Conta Fixa", não é o padrão!). À vista sai na hora e já fica pago. Ex.: "gastei 50 no mercado" ou "paguei 30 no pix" → "cartao": "extra".
+4. Compra no CARTÃO de crédito (só quando o usuário citar o cartão, ex.: "no nubank", "no cartão"): use a chave do cartão e a "data_compra"; o sistema descobre sozinho em qual fatura cai e quando vence. Para uma despesa AGENDADA (futura), use a data futura.
+5. Juros/multa: explique na "mensagem"; se o usuário pedir para lançar, crie "inserir_despesa" com is_fee: true.
+6. "parcelas" e "meses_recorrente" no mínimo 1. Cartões válidos: "nubank", "will", "havan", "amazon", "mercadopago", "fixa", "extra".
 
 DADOS DE CONTEXTO ESTÃO ANEXADOS AO COMANDO DO USUÁRIO.`;
 
@@ -206,33 +215,76 @@ DADOS DE CONTEXTO ESTÃO ANEXADOS AO COMANDO DO USUÁRIO.`;
       else if (act.acao === 'inserir_despesa') {
         const amountVal = parseFloat(act.valor)
         if (isFinite(amountVal) && amountVal > 0) {
-          const cardKey = act.cartao || 'extra'
+          let cardKey = act.cartao || 'extra'
+          // Rede de segurança: se o usuário falou em Pix/dinheiro/débito e NÃO citou um
+          // cartão de crédito, é à vista ("extra") — mesmo que o modelo tenha errado o cartão.
+          const t = (userText || '').toLowerCase()
+          const mentionsCash = /\b(pix|dinheiro|d[eé]bito|debito|[aà] vista|avista|esp[eé]cie)\b/.test(t)
+          const mentionsCredit = /\b(cart[aã]o|cr[eé]dito|credito|fatura|parcel)/.test(t) ||
+            (cards || []).some(c => c.name && t.includes(c.name.toLowerCase()))
+          if (mentionsCash && !mentionsCredit) cardKey = 'extra'
+          const cardObj = (cards || []).find(c =>
+            (c.key || '').toLowerCase() === String(cardKey).toLowerCase() ||
+            (c.name || '').toLowerCase() === String(cardKey).toLowerCase()
+          )
+          const isOnCard = !!cardObj && String(cardKey).toLowerCase() !== 'extra'
+          // Prefere a data; só cai nos índices antigos se a IA mandar índice sem data.
+          const explicitIdx = act.mes_inicio_idx != null && !act.data_compra
+          const pdate = parseDateSafe(act.data_compra) || (explicitIdx ? null : new Date())
+
+          let start_month, pay_day, paidThrough
+          if (pdate) {
+            if (isOnCard) {
+              const slot = invoiceSlotForPurchase(cardObj, pdate)
+              start_month = slot.startMonthIdx
+              pay_day = slot.payDay
+            } else {
+              start_month = monthIdxForDate(pdate)
+              pay_day = pdate.getDate()
+              if (pdate <= new Date()) paidThrough = start_month // à vista hoje/passado = já pago
+            }
+          } else {
+            start_month = Math.min(HORIZON - 1, Math.max(0, parseInt(act.mes_inicio_idx) || 0))
+            pay_day = Math.min(31, Math.max(1, parseInt(act.dia_vencimento) || (cardObj && cardObj.due_day) || 5))
+          }
+
           const payload = {
             user_id: user.id,
             description: act.descricao || 'Despesa',
             amount: amountVal,
-            start_month: Math.min(HORIZON - 1, Math.max(0, parseInt(act.mes_inicio_idx) || 0)),
-            total_installments: Math.min(360, Math.max(1, parseInt(act.parcelas) || 1)),
+            start_month,
+            total_installments: isOnCard ? Math.min(360, Math.max(1, parseInt(act.parcelas) || 1)) : 1,
             card: cardKey,
             card_id: cardIdByKey[String(cardKey).toLowerCase()] || null,
             category: categorize(act.descricao) || null,
-            pay_day: Math.min(31, Math.max(1, parseInt(act.dia_vencimento) || 5)),
+            pay_day,
             is_fee: !!act.is_fee,
             source: 'ai'
           }
+          if (paidThrough !== undefined) payload.paid_through = paidThrough
           await supabase.from('expenses').insert(payload)
         }
       }
       else if (act.acao === 'inserir_receita') {
         const amountVal = parseFloat(act.valor)
         if (isFinite(amountVal) && amountVal > 0) {
+          const explicitIdx = act.mes_inicio_idx != null && !act.data_inicio
+          const pdate = parseDateSafe(act.data_inicio) || (explicitIdx ? null : new Date())
+          let start_month, pay_day
+          if (pdate) {
+            start_month = monthIdxForDate(pdate)
+            pay_day = pdate.getDate()
+          } else {
+            start_month = Math.min(HORIZON - 1, Math.max(0, parseInt(act.mes_inicio_idx) || 0))
+            pay_day = Math.min(31, Math.max(1, parseInt(act.dia_pagamento) || 5))
+          }
           const payload = {
             user_id: user.id,
             description: act.descricao || 'Receita',
             amount: amountVal,
-            start_month: Math.min(HORIZON - 1, Math.max(0, parseInt(act.mes_inicio_idx) || 0)),
+            start_month,
             total_months: Math.min(360, Math.max(1, parseInt(act.meses_recorrente) || 1)),
-            pay_day: Math.min(31, Math.max(1, parseInt(act.dia_pagamento) || 5)),
+            pay_day,
             source: 'ai'
           }
           await supabase.from('extra_income').insert(payload)

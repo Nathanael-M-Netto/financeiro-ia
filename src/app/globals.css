@@ -1396,3 +1396,38 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 .saldo-atual::after { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--pos); }
 .saldo-atual .hero-label { color: var(--pos); font-weight: 700; }
 .saldo-atual-val { font-size: 2.2rem; color: var(--pos); }
+
+/* Dica de "onde cai" o lançamento (form de Lançamentos) */
+.form-hint { margin-top: -4px; margin-bottom: 4px; padding: 9px 12px; border-radius: var(--r); font-size: .78rem; font-weight: 600; line-height: 1.4; border: 1px solid var(--border); background: var(--surface2); color: var(--text2); }
+.form-hint.hint-card { border-color: rgba(77,131,255,.35); background: rgba(77,131,255,.1); color: #b9ccff; }
+.form-hint.hint-pos { border-color: rgba(16,212,156,.32); background: rgba(16,212,156,.1); color: #6ee7c0; }
+.form-hint.hint-warn { border-color: rgba(245,180,80,.34); background: rgba(245,180,80,.1); color: #f3c887; }
+
+/* Barra de filtros em Lançamentos */
+.lanc-filters { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
+.lanc-filters .form-input { width: auto; min-width: 150px; padding: 8px 11px; font-size: .82rem; }
+.lanc-filter-search { flex: 1 1 200px; }
+
+/* Onboarding de primeira vez (dashboard sem dados) */
+.onboarding { background: linear-gradient(160deg, rgba(77,131,255,.1), var(--surface)); border: 1px solid rgba(77,131,255,.25); border-radius: var(--r); padding: 22px 24px; margin-bottom: 22px; }
+.onb-head { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.onb-badge { width: 42px; height: 42px; border-radius: 12px; background: var(--info-dim); color: var(--info); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.onb-title { font-size: 1.15rem; font-weight: 800; color: var(--text); margin: 0; }
+.onb-sub { font-size: .85rem; color: var(--text2); margin: 2px 0 0; }
+.onb-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.onb-step { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); text-decoration: none; transition: border-color .15s, transform .15s; }
+.onb-step:hover { border-color: var(--info); transform: translateY(-2px); text-decoration: none; }
+.onb-num { width: 26px; height: 26px; border-radius: 50%; background: var(--info); color: #fff; font-weight: 800; font-size: .85rem; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.onb-step-txt { display: flex; flex-direction: column; gap: 3px; }
+.onb-step-txt strong { font-size: .88rem; color: var(--text); font-weight: 700; }
+.onb-step-txt span { font-size: .76rem; color: var(--text2); line-height: 1.35; }
+@media (max-width: 760px) { .onb-steps { grid-template-columns: 1fr; } }
+
+/* Grana atual em destaque no topo — banner verde compacto */
+.grana-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 18px; background: linear-gradient(120deg, rgba(16,212,156,.14), var(--surface)); border: 1px solid rgba(16,212,156,.3); border-left: 3px solid var(--pos); border-radius: var(--r); padding: 12px 18px; margin-bottom: 18px; }
+.grana-top-main { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.grana-top-label { font-size: .64rem; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--pos); }
+.grana-top-val { font-size: 1.6rem; font-weight: 800; font-family: var(--font-mono); color: var(--pos); letter-spacing: -.02em; }
+.grana-top-sub { font-size: .76rem; font-weight: 600; color: var(--warn); }
+.grana-top-sub.ok { color: var(--pos); }
+@media (max-width: 900px) { .grana-top { display: none; } }

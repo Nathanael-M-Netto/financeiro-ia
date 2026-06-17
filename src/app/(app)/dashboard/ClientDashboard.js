@@ -5,11 +5,12 @@ import { useRouter } from 'next/navigation'
 import { computeAll, formatCurrency, monthIdxForDate } from '@/lib/finance-engine'
 import { createClient } from '@/lib/supabase-browser'
 import { CARD_META, HORIZON, monthBaseName, monthYear } from '@/lib/constants'
+import { CATEGORY_META } from '@/lib/categorize'
+import { IconChevronLeft, IconChevronRight, IconAlert, IconCheck, IconSparkles } from '@/lib/icons'
+import Link from 'next/link'
 
 // Quantos meses mostrar a partir do mês atual (janela rolante).
 const WINDOW = 12
-import { CATEGORY_META } from '@/lib/categorize'
-import { IconChevronLeft, IconChevronRight, IconAlert, IconCheck } from '@/lib/icons'
 
 // Gráfico de rosca (só o perímetro dividido entre as categorias, centro vazio).
 function CategoryDonut({ data, total, selected, onSelect }) {
@@ -134,7 +135,44 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
         </div>
       </header>
 
+      {/* Primeira vez: passo a passo enquanto não há lançamentos */}
+      {!hasData && (
+        <section className="onboarding">
+          <div className="onb-head">
+            <div className="onb-badge"><IconSparkles size={20} /></div>
+            <div>
+              <h2 className="onb-title">Bem-vindo ao FinDash 👋</h2>
+              <p className="onb-sub">Monte seu controle em 3 passos rápidos. Leva 2 minutos.</p>
+            </div>
+          </div>
+          <div className="onb-steps">
+            <Link className="onb-step" href="/cards">
+              <span className="onb-num">1</span>
+              <div className="onb-step-txt">
+                <strong>Cadastre seus cartões</strong>
+                <span>Limite, dia de fechamento e de vencimento.</span>
+              </div>
+            </Link>
+            <Link className="onb-step" href="/lancamentos">
+              <span className="onb-num">2</span>
+              <div className="onb-step-txt">
+                <strong>Lance uma despesa ou receita</strong>
+                <span>Pix, cartão, salário… a fatura é calculada sozinha.</span>
+              </div>
+            </Link>
+            <Link className="onb-step" href="/chat">
+              <span className="onb-num">3</span>
+              <div className="onb-step-txt">
+                <strong>Ou só peça pra IA</strong>
+                <span>“Gastei 50 no Pix hoje no mercado.”</span>
+              </div>
+            </Link>
+          </div>
+        </section>
+      )}
+
       {/* Seletor de meses em abas */}
+      {hasData && (
       <div className="month-tabs">
         {windowMetrics.map((m) => (
           <button key={m.idx} className={`month-tab ${currentMonth === m.idx ? 'active' : ''} ${m.isCurrent ? 'is-current' : ''}`} onClick={() => setCurrentMonth(m.idx)}>
@@ -143,8 +181,23 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
           </button>
         ))}
       </div>
+      )}
 
-      {/* Resumo essencial (só mobile) + alternar detalhes */}
+      {/* Grana atual em destaque, no topo (compacto) */}
+      {hasData && currentMetric.isCurrent && (
+        <div className="grana-top">
+          <div className="grana-top-main">
+            <span className="grana-top-label">Grana atual — agora</span>
+            <span className="grana-top-val">{formatCurrency(currentMetric.saldoAtual)}</span>
+          </div>
+          {currentMetric.pendingPay > 0
+            ? <span className="grana-top-sub">ainda falta pagar {formatCurrency(currentMetric.pendingPay)} este mês</span>
+            : <span className="grana-top-sub ok">tudo deste mês está pago</span>}
+        </div>
+      )}
+
+      {/* Resumo essencial (só mobile) */}
+      {hasData && (
       <div className="mobile-summary">
         {currentMetric.isCurrent && (
           <div className="ms-item"><span>Grana atual</span><strong className="ms-pos">{formatCurrency(currentMetric.saldoAtual)}</strong></div>
@@ -152,6 +205,8 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
         <div className="ms-item"><span>Falta pagar</span><strong className="ms-warn">{formatCurrency(currentMetric.pendingPay)}</strong></div>
         <div className="ms-item"><span>Saldo fim do mês</span><strong style={{ color: currentMetric.balance >= 0 ? 'var(--pos)' : 'var(--neg)' }}>{formatCurrency(currentMetric.balance)}</strong></div>
       </div>
+      )}
+      {hasData && (<>
       <button className="dash-details-toggle" onClick={() => setShowDetails(v => !v)}>
         {showDetails ? 'Ocultar detalhes ▲' : 'Ver detalhes (gráficos, linha do tempo) ▼'}
       </button>
@@ -191,6 +246,7 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
           <div className="kpi-sub">cartões ou itens no mês</div>
         </div>
       </section>
+      </>)}
 
       {hasData && (
         <section className="dash-grid dash-detail">
@@ -284,6 +340,7 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
         </section>
       )}
 
+      {hasData && (
       <section className="timeline-card dash-detail">
         <div className="timeline-head">
           <div className="timeline-title" style={{ marginBottom: 0 }}>Linha do tempo — {currentMetric.monthName}</div>
@@ -313,6 +370,7 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
           </div>
         </div>
       </section>
+      )}
 
       {currentMetric.isCurrent && (currentMetric.pendingPay > 0 || currentMetric.overdueAmount > 0) && (
         <div className="pay-summary">
@@ -343,15 +401,6 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
           <span>{alert.text}</span>
         </div>
       ))}
-
-      {!hasData && (
-        <div className="empty-state" style={{ margin: '40px 0' }}>
-          <div className="empty-state-title">Seu painel está vazio</div>
-          <div className="empty-state-desc">
-            Adicione despesas e receitas em <strong>Lançamentos</strong>, ou converse com o <strong>Assistente IA</strong> para começar.
-          </div>
-        </div>
-      )}
 
       {hasData && (
         <section className="month-panel dash-detail">
@@ -411,15 +460,6 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
           </div>
 
           <div className="summary-col">
-            {currentMetric.isCurrent && (
-              <div className="saldo-atual">
-                <div className="hero-label">Grana atual — agora</div>
-                <div className="saldo-atual-val">{formatCurrency(currentMetric.saldoAtual)}</div>
-                {currentMetric.pendingPay > 0
-                  ? <div className="saldo-atual-sub">Ainda falta pagar {formatCurrency(currentMetric.pendingPay)} este mês</div>
-                  : <div className="saldo-atual-sub ok">Tudo deste mês está pago</div>}
-              </div>
-            )}
             <div className={`balance-hero ${currentMetric.balance >= 0 ? 'positive' : 'negative'}`}>
               <div className="hero-label">Saldo efetivo — fim do mês</div>
               <div className={`hero-value ${currentMetric.balance >= 0 ? 'hero-positive' : 'hero-negative'}`}>{formatCurrency(currentMetric.balance)}</div>

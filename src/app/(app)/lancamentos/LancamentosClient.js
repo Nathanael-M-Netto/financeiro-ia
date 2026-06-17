@@ -3,11 +3,26 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase-browser'
-import { formatCurrency, monthIdxForDate } from '@/lib/finance-engine'
+import { formatCurrency, monthIdxForDate, invoiceSlotForPurchase } from '@/lib/finance-engine'
 import { MONTHS_NAMES } from '@/lib/constants'
 import { cardChipStyle } from '@/lib/cards'
 import { categorize, CATEGORY_META, CATEGORY_KEYS } from '@/lib/categorize'
 import { IconPlus, IconPencil, IconTrash, IconClose } from '@/lib/icons'
+
+// Data de hoje (local) como 'YYYY-MM-DD' para o <input type="date">.
+function isoDate(d = new Date()) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+// Converte 'YYYY-MM-DD' em Date local (00:00), sem o deslize de fuso do new Date(string).
+function parseISO(s) {
+  if (!s) return new Date()
+  const [y, m, d] = String(s).split('-').map(Number)
+  return new Date(y, (m || 1) - 1, d || 1)
+}
 
 function DetailRow({ label, value, mono }) {
   return (
@@ -21,7 +36,7 @@ function DetailRow({ label, value, mono }) {
 const EMPTY = {
   description: '', amount: '', card_id: '', category: '',
   start_month: 0, total_installments: 1, total_months: 1,
-  pay_day: '', is_fee: false,
+  pay_day: '', is_fee: false, purchase_date: '',
 }
 
 export default function LancamentosClient({ initialExpenses, initialIncomes, cards, userId }) {
@@ -40,6 +55,10 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
   const [catTouched, setCatTouched] = useState(false) // se o usuário escolheu a categoria na mão
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' })
+  // Filtros das listas
+  const [filterText, setFilterText] = useState('')
+  const [filterCard, setFilterCard] = useState('') // '' = todos · 'extra' = à vista · senão card_id
+  const [filterMonth, setFilterMonth] = useState('') // '' = todos · senão índice do mês
 
   const showToast = (message, type = 'success') => {
     setToast({ show: true, message, type })
@@ -85,7 +104,9 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
     setFormType(type)
     setEditingId(null)
     setCatTouched(false)
-    setForm({ ...EMPTY, start_month: monthIdxForDate(), card_id: type === 'despesa' && cards[0] ? cards[0].id : '' })
+    // Novo lançamento começa pela DATA (hoje). Despesa começa "à vista" (sem cartão),
+    // que é o caso mais comum (Pix/dinheiro/débito); o usuário escolhe o cartão se quiser.
+    setForm({ ...EMPTY, start_month: monthIdxForDate(), purchase_date: isoDate(), card_id: '' })
     setShowModal(true)
   }
 
@@ -126,8 +147,32 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
     if (!form.description.trim()) { showToast('Dê uma descrição.', 'error'); return }
     const amount = Number(form.amount)
     if (!isFinite(amount) || amount <= 0) { showToast('Informe um valor válido (maior que zero).', 'error'); return }
-    const day = form.pay_day === '' ? null : parseInt(form.pay_day, 10)
-    if (day !== null && (isNaN(day) || day < 1 || day > 31)) { showToast('O dia deve ser entre 1 e 31.', 'error'); return }
+
+    // Mês de início e dia: na EDIÇÃO usa os campos manuais (preserva o que já existe);
+    // num lançamento NOVO, deriva da data (e, para despesa em cartão, do ciclo de fatura).
+    let start_month, pay_day, paidThrough
+    if (editingId) {
+      start_month = Number(form.start_month) || 0
+      const d = form.pay_day === '' ? null : parseInt(form.pay_day, 10)
+      if (d !== null && (isNaN(d) || d < 1 || d > 31)) { showToast('O dia deve ser entre 1 e 31.', 'error'); return }
+      pay_day = d
+    } else {
+      const pdate = parseISO(form.purchase_date)
+      if (!form.purchase_date || isNaN(pdate)) { showToast('Informe uma data válida.', 'error'); return }
+      if (formType === 'despesa' && form.card_id) {
+        const card = cards.find(c => c.id === form.card_id)
+        const slot = invoiceSlotForPurchase(card, pdate)
+        start_month = slot.startMonthIdx
+        pay_day = slot.payDay
+      } else {
+        // À vista (Pix/dinheiro/débito) ou receita: cai no mês/dia da própria data.
+        start_month = monthIdxForDate(pdate)
+        pay_day = pdate.getDate()
+        // Dinheiro que já saiu (despesa à vista com data de hoje ou passada) => já pago.
+        if (formType === 'despesa' && !form.card_id && pdate <= new Date()) paidThrough = start_month
+      }
+    }
+
     if (formType === 'despesa') {
       const p = Number(form.total_installments)
       if (!isFinite(p) || p < 1 || p > 360) { showToast('Parcelas inválidas (de 1 a 360).', 'error'); return }
@@ -140,6 +185,8 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
     try {
       if (formType === 'despesa') {
         const card = cards.find(c => c.id === form.card_id)
+        // À vista é pagamento único; parcelamento só faz sentido no cartão.
+        const installments = form.card_id ? (Number(form.total_installments) || 1) : 1
         const payload = {
           user_id: userId,
           description: form.description.trim(),
@@ -147,12 +194,13 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
           card: card ? (card.key || card.name.toLowerCase()) : 'extra',
           card_id: form.card_id || null,
           category: form.category || null,
-          start_month: Number(form.start_month) || 0,
-          total_installments: Number(form.total_installments) || 1,
-          pay_day: form.pay_day === '' ? null : parseInt(form.pay_day, 10),
+          start_month,
+          total_installments: installments,
+          pay_day,
           is_fee: !!form.is_fee,
           source: 'manual',
         }
+        if (paidThrough !== undefined) payload.paid_through = paidThrough
         const q = editingId
           ? supabase.from('expenses').update(payload).eq('id', editingId)
           : supabase.from('expenses').insert(payload)
@@ -163,9 +211,9 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
           user_id: userId,
           description: form.description.trim(),
           amount,
-          start_month: Number(form.start_month) || 0,
+          start_month,
           total_months: Number(form.total_months) || 1,
-          pay_day: form.pay_day === '' ? null : parseInt(form.pay_day, 10),
+          pay_day,
           source: 'manual',
         }
         const q = editingId
@@ -223,11 +271,47 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
 
   const monthName = (idx) => MONTHS_NAMES[idx] || '—'
 
+  // Listas filtradas (texto / cartão / mês). Cartão só afeta despesas.
+  const matchText = (desc) => !filterText || (desc || '').toLowerCase().includes(filterText.toLowerCase())
+  const matchMonth = (sm) => filterMonth === '' || String(sm) === String(filterMonth)
+  const fExpenses = expenses.filter(e => {
+    if (!matchText(e.description)) return false
+    if (!matchMonth(e.start_month)) return false
+    if (filterCard === 'extra' && e.card_id) return false
+    if (filterCard && filterCard !== 'extra' && e.card_id !== filterCard) return false
+    return true
+  })
+  const fIncomes = incomes.filter(i => matchText(i.description) && matchMonth(i.start_month))
+  const filtersActive = filterText !== '' || filterCard !== '' || filterMonth !== ''
+  // Meses presentes nos lançamentos (para o seletor de filtro).
+  const monthsPresent = [...new Set([...expenses, ...incomes].map(x => x.start_month))]
+    .filter(m => m != null).sort((a, b) => a - b)
+
   const selectedItem = selected
     ? (selected.kind === 'despesa'
         ? expenses.find(e => e.id === selected.id)
         : incomes.find(i => i.id === selected.id))
     : null
+
+  // Prévia de "onde cai" o lançamento novo, a partir da data escolhida (só no modo novo).
+  const preview = (() => {
+    if (editingId || !form.purchase_date) return null
+    const pdate = parseISO(form.purchase_date)
+    if (isNaN(pdate)) return null
+    if (formType === 'despesa' && form.card_id) {
+      const card = cards.find(c => c.id === form.card_id)
+      const s = invoiceSlotForPurchase(card, pdate)
+      return { tone: 'card', text: `Entra na fatura de ${MONTHS_NAMES[s.startMonthIdx]} · vence dia ${s.payDay}` }
+    }
+    const idx = monthIdxForDate(pdate)
+    if (formType === 'receita') {
+      return { tone: 'pos', text: `Começa em ${MONTHS_NAMES[idx]} · dia ${pdate.getDate()}` }
+    }
+    const paid = pdate <= new Date()
+    return paid
+      ? { tone: 'pos', text: `À vista — sai dia ${pdate.getDate()} de ${MONTHS_NAMES[idx]} · já marcado como pago` }
+      : { tone: 'warn', text: `Agendado — sai dia ${pdate.getDate()} de ${MONTHS_NAMES[idx]} (ainda não pago)` }
+  })()
 
   return (
     <div className="cards-page">
@@ -247,15 +331,37 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
 
       <div className="lanc-layout">
         <div className="lanc-main">
+          {/* FILTROS */}
+          {(expenses.length > 0 || incomes.length > 0) && (
+            <div className="lanc-filters">
+              <input className="form-input lanc-filter-search" placeholder="Buscar por descrição…"
+                value={filterText} onChange={e => setFilterText(e.target.value)} />
+              <select className="form-input" value={filterCard} onChange={e => setFilterCard(e.target.value)}>
+                <option value="">Todos os cartões</option>
+                <option value="extra">À vista (Pix / dinheiro)</option>
+                {cards.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <select className="form-input" value={filterMonth} onChange={e => setFilterMonth(e.target.value)}>
+                <option value="">Todos os meses</option>
+                {monthsPresent.map(m => <option key={m} value={m}>{monthName(m)}</option>)}
+              </select>
+              {filtersActive && (
+                <button className="btn-ghost" onClick={() => { setFilterText(''); setFilterCard(''); setFilterMonth('') }}>Limpar</button>
+              )}
+            </div>
+          )}
+
           {/* DESPESAS */}
           <section className="card" style={{ marginBottom: '18px' }}>
             <div className="card-header">
               <span className="timeline-title" style={{ marginBottom: 0 }}>Despesas</span>
-              <span className="lanc-count">{expenses.length}</span>
+              <span className="lanc-count">{filtersActive ? `${fExpenses.length}/${expenses.length}` : expenses.length}</span>
             </div>
             <div className="card-body" style={{ padding: 0 }}>
               {expenses.length === 0 ? (
                 <div className="lanc-empty">Nenhuma despesa. Clique em “Nova despesa”.</div>
+              ) : fExpenses.length === 0 ? (
+                <div className="lanc-empty">Nenhuma despesa com esses filtros.</div>
               ) : (
                 <table className="exp-table exp-table-rows">
                   <thead>
@@ -268,7 +374,7 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
                     </tr>
                   </thead>
                   <tbody>
-                    {expenses.map((e) => {
+                    {fExpenses.map((e) => {
                       const c = cardFor(e)
                       const sel = selected?.kind === 'despesa' && selected.id === e.id
                       return (
@@ -291,11 +397,13 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
           <section className="card">
             <div className="card-header">
               <span className="timeline-title" style={{ marginBottom: 0 }}>Receitas</span>
-              <span className="lanc-count">{incomes.length}</span>
+              <span className="lanc-count">{filtersActive ? `${fIncomes.length}/${incomes.length}` : incomes.length}</span>
             </div>
             <div className="card-body" style={{ padding: 0 }}>
               {incomes.length === 0 ? (
                 <div className="lanc-empty">Nenhuma receita. Clique em “Nova receita”.</div>
+              ) : fIncomes.length === 0 ? (
+                <div className="lanc-empty">Nenhuma receita com esses filtros.</div>
               ) : (
                 <table className="exp-table exp-table-rows">
                   <thead>
@@ -307,7 +415,7 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
                     </tr>
                   </thead>
                   <tbody>
-                    {incomes.map((i) => {
+                    {fIncomes.map((i) => {
                       const sel = selected?.kind === 'receita' && selected.id === i.id
                       return (
                         <tr key={i.id} className={`row-click ${sel ? 'row-selected' : ''}`} onClick={() => setSelected({ kind: 'receita', id: i.id })}>
@@ -397,38 +505,69 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
                 placeholder={formType === 'despesa' ? 'Ex: Mercado, Netflix, Uber...' : 'Ex: Salário'} />
             </div>
 
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">Valor (R$)</label>
-                <input className="form-input" type="number" min="0" step="0.01" value={form.amount}
-                  onChange={e => setForm({ ...form, amount: e.target.value })} placeholder="0,00" />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Mês de início</label>
-                <select className="form-input" value={form.start_month}
-                  onChange={e => setForm({ ...form, start_month: e.target.value })}>
-                  {MONTHS_NAMES.map((m, i) => <option key={i} value={i}>{m}</option>)}
-                </select>
-              </div>
-            </div>
-
             {formType === 'despesa' ? (
               <>
                 <div className="form-row">
                   <div className="form-group">
-                    <label className="form-label">Cartão</label>
+                    <label className="form-label">Valor (R$)</label>
+                    <input className="form-input" type="number" min="0" step="0.01" value={form.amount}
+                      onChange={e => setForm({ ...form, amount: e.target.value })} placeholder="0,00" />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Forma / cartão</label>
                     <select className="form-input" value={form.card_id}
                       onChange={e => setForm({ ...form, card_id: e.target.value })}>
-                      <option value="">Sem cartão / Extra</option>
+                      <option value="">À vista (Pix / dinheiro / débito)</option>
                       {cards.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                     </select>
                   </div>
-                  <div className="form-group">
-                    <label className="form-label">Parcelas</label>
-                    <input className="form-input" type="number" min="1" max="48" value={form.total_installments}
-                      onChange={e => setForm({ ...form, total_installments: e.target.value })} />
-                  </div>
                 </div>
+
+                {editingId ? (
+                  // EDIÇÃO: campos manuais, pra não alterar em silêncio o que já existe.
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label className="form-label">Mês de início</label>
+                      <select className="form-input" value={form.start_month}
+                        onChange={e => setForm({ ...form, start_month: e.target.value })}>
+                        {MONTHS_NAMES.map((m, i) => <option key={i} value={i}>{m}</option>)}
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Dia de vencimento</label>
+                      <input className="form-input" type="number" min="1" max="31" value={form.pay_day}
+                        onChange={e => setForm({ ...form, pay_day: e.target.value })} placeholder="1–31" />
+                    </div>
+                  </div>
+                ) : form.card_id ? (
+                  // NOVO no cartão: a data da compra define a fatura.
+                  <>
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label className="form-label">Data da compra</label>
+                        <input className="form-input" type="date" value={form.purchase_date}
+                          onChange={e => setForm({ ...form, purchase_date: e.target.value })} />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Parcelas</label>
+                        <input className="form-input" type="number" min="1" max="48" value={form.total_installments}
+                          onChange={e => setForm({ ...form, total_installments: e.target.value })} />
+                      </div>
+                    </div>
+                    {preview && <div className={`form-hint hint-${preview.tone}`}>{preview.text}</div>}
+                  </>
+                ) : (
+                  // NOVO à vista: a data é quando o dinheiro saiu.
+                  <>
+                    <div className="form-group">
+                      <label className="form-label">Data (quando saiu o dinheiro)</label>
+                      <input className="form-input" type="date" value={form.purchase_date}
+                        onChange={e => setForm({ ...form, purchase_date: e.target.value })} />
+                    </div>
+                    {preview && <div className={`form-hint hint-${preview.tone}`}>{preview.text}</div>}
+                  </>
+                )}
+
                 <div className="form-group">
                   <label className="form-label">Categoria {!catTouched && form.category ? <span style={{ color: 'var(--info)', fontWeight: 700 }}>· sugerida pelo nome</span> : null}</label>
                   <select className="form-input" value={form.category}
@@ -437,12 +576,15 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
                     {CATEGORY_KEYS.map(k => <option key={k} value={k}>{CATEGORY_META[k].name}</option>)}
                   </select>
                 </div>
+
                 <div className="form-row">
-                  <div className="form-group">
-                    <label className="form-label">Dia de vencimento</label>
-                    <input className="form-input" type="number" min="1" max="31" value={form.pay_day}
-                      onChange={e => setForm({ ...form, pay_day: e.target.value })} placeholder="1–31" />
-                  </div>
+                  {editingId && (
+                    <div className="form-group">
+                      <label className="form-label">Parcelas</label>
+                      <input className="form-input" type="number" min="1" max="48" value={form.total_installments}
+                        onChange={e => setForm({ ...form, total_installments: e.target.value })} />
+                    </div>
+                  )}
                   <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
                     <label className="form-check">
                       <input type="checkbox" checked={form.is_fee}
@@ -453,18 +595,52 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
                 </div>
               </>
             ) : (
-              <div className="form-row">
-                <div className="form-group">
-                  <label className="form-label">Duração (meses)</label>
-                  <input className="form-input" type="number" min="1" max="12" value={form.total_months}
-                    onChange={e => setForm({ ...form, total_months: e.target.value })} />
+              // RECEITA
+              <>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">Valor (R$)</label>
+                    <input className="form-input" type="number" min="0" step="0.01" value={form.amount}
+                      onChange={e => setForm({ ...form, amount: e.target.value })} placeholder="0,00" />
+                  </div>
+                  {editingId ? (
+                    <div className="form-group">
+                      <label className="form-label">Mês de início</label>
+                      <select className="form-input" value={form.start_month}
+                        onChange={e => setForm({ ...form, start_month: e.target.value })}>
+                        {MONTHS_NAMES.map((m, i) => <option key={i} value={i}>{m}</option>)}
+                      </select>
+                    </div>
+                  ) : (
+                    <div className="form-group">
+                      <label className="form-label">Data do 1º recebimento</label>
+                      <input className="form-input" type="date" value={form.purchase_date}
+                        onChange={e => setForm({ ...form, purchase_date: e.target.value })} />
+                    </div>
+                  )}
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Dia de pagamento</label>
-                  <input className="form-input" type="number" min="1" max="31" value={form.pay_day}
-                    onChange={e => setForm({ ...form, pay_day: e.target.value })} placeholder="1–31" />
-                </div>
-              </div>
+                {!editingId && preview && <div className={`form-hint hint-${preview.tone}`}>{preview.text}</div>}
+                {editingId ? (
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label className="form-label">Duração (meses)</label>
+                      <input className="form-input" type="number" min="1" max="360" value={form.total_months}
+                        onChange={e => setForm({ ...form, total_months: e.target.value })} />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Dia de pagamento</label>
+                      <input className="form-input" type="number" min="1" max="31" value={form.pay_day}
+                        onChange={e => setForm({ ...form, pay_day: e.target.value })} placeholder="1–31" />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="form-group">
+                    <label className="form-label">Por quantos meses se repete?</label>
+                    <input className="form-input" type="number" min="1" max="360" value={form.total_months}
+                      onChange={e => setForm({ ...form, total_months: e.target.value })} />
+                  </div>
+                )}
+              </>
             )}
           </div>
           <div className="modal-ft">

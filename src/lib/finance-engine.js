@@ -13,9 +13,56 @@ export function monthIdxForDate(date = new Date()) {
   return Math.max(0, Math.min(HORIZON - 1, idx))
 }
 
+// Limita um dia ao último dia válido do mês (ex.: dia 31 em mês de 30 vira 30),
+// evitando que o `new Date` "vaze" para o mês seguinte.
+export function clampDayToMonth(monthIdx, day) {
+  const lastDay = new Date(BASE_YEAR, BASE_MONTH + monthIdx + 1, 0).getDate()
+  return Math.max(1, Math.min(parseInt(day, 10) || 1, lastDay))
+}
+
 // Data real (00:00) de um evento no mês `monthIdx`, dia `day`.
 export function dateForMonthDay(monthIdx, day) {
-  return new Date(BASE_YEAR, BASE_MONTH + monthIdx, day || 1)
+  return new Date(BASE_YEAR, BASE_MONTH + monthIdx, clampDayToMonth(monthIdx, day))
+}
+
+// Índice de mês absoluto (0 = Abril/2026) SEM travar no horizonte — usado em cálculos.
+function rawMonthIdx(date) {
+  return (date.getFullYear() - BASE_YEAR) * 12 + (date.getMonth() - BASE_MONTH)
+}
+
+/**
+ * Dada uma compra (data) num cartão, descobre em qual FATURA ela cai e quando
+ * vence, no padrão de mercado (fechamento → vencimento).
+ *
+ * - Com `closing_day`: a compra entra na fatura que fecha neste mês se foi feita
+ *   até o fechamento; senão, na próxima. O vencimento cai no mesmo mês do
+ *   fechamento se o dia de vencimento for depois do fechamento; senão, no mês seguinte.
+ * - Sem `closing_day`: regra simples — comprou até o dia do vencimento, é a fatura
+ *   deste mês; senão, a do mês que vem.
+ *
+ * Retorna { startMonthIdx, payDay } no frame absoluto (0 = Abril/2026).
+ */
+export function invoiceSlotForPurchase(card, purchaseDate = new Date()) {
+  const dueDay = clampDayToMonthlessDefault(card?.due_day, 10)
+  const purchaseIdx = rawMonthIdx(purchaseDate)
+  const d = purchaseDate.getDate()
+  let dueIdx
+  if (card?.closing_day) {
+    const closeDay = card.closing_day
+    const closingIdx = d <= closeDay ? purchaseIdx : purchaseIdx + 1
+    dueIdx = dueDay > closeDay ? closingIdx : closingIdx + 1
+  } else {
+    dueIdx = d <= dueDay ? purchaseIdx : purchaseIdx + 1
+  }
+  const clamped = Math.max(0, Math.min(HORIZON - 1, dueIdx))
+  return { startMonthIdx: clamped, payDay: dueDay }
+}
+
+// Dia válido (1–31) com fallback; não depende de um mês específico.
+function clampDayToMonthlessDefault(day, fallback) {
+  const n = parseInt(day, 10)
+  if (!Number.isFinite(n)) return fallback
+  return Math.max(1, Math.min(31, n))
 }
 
 function startOfDay(d) {
