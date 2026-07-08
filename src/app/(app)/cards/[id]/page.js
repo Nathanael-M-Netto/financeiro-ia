@@ -133,7 +133,7 @@ export default async function CardDetailPage({ params }) {
                   <tr key={e.id}>
                     <td>{e.is_fee ? 'Juros/Multa' : (e.description || 'Despesa')}</td>
                     <td>{MONTHS_NAMES[e.start_month] || '—'}</td>
-                    <td style={{ textAlign: 'center' }}><span className="inst-badge">{e.is_fee ? '—' : `${e.total_installments}x`}</span></td>
+                    <td style={{ textAlign: 'center' }}><span className="inst-badge">{e.is_fee ? '—' : (e.is_recurring ? 'Fixa' : `${e.total_installments}x`)}</span></td>
                     <td className="amt-col">{formatCurrency(parseFloat(e.amount) || 0)}</td>
                   </tr>
                 ))}

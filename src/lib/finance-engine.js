@@ -82,12 +82,24 @@ export function computeLateCharge(amount, daysLate) {
   return { fine, interest, charge, total: a + charge, daysLate }
 }
 
-export function computeAll(expenses = [], extraIncome = [], today = null) {
+export function computeAll(expenses = [], extraIncome = [], today = null, cards = []) {
   const hasToday = today instanceof Date && !isNaN(today)
   const todayMid = hasToday ? startOfDay(today) : null
   const rawIdx = hasToday ? (today.getFullYear() - BASE_YEAR) * 12 + (today.getMonth() - BASE_MONTH) : -1
   const inRange = hasToday && rawIdx >= 0 && rawIdx <= HORIZON - 1
   const currentMonthIdx = inRange ? rawIdx : -1
+
+  // Fonte única de verdade do vencimento: o CARTÃO. Se o usuário mudar o
+  // due_day do cartão, todas as despesas dele acompanham na hora. O pay_day
+  // gravado na despesa só manda no "extra"/à vista (cada gasto tem sua data).
+  const cardById = new Map((cards || []).map(c => [c.id, c]))
+  const cardByKey = new Map((cards || []).map(c => [c.key, c]))
+  const payDayFor = (exp) => {
+    const cardObj = (exp.card_id && cardById.get(exp.card_id)) || cardByKey.get(exp.card) || null
+    const isCashLike = exp.card === 'extra' || cardObj?.key === 'extra'
+    if (isCashLike) return exp.pay_day || cardObj?.due_day || 10
+    return cardObj?.due_day || exp.pay_day || CARD_META[exp.card]?.payDay || 10
+  }
 
   let carryover = 0
   const metrics = []
@@ -95,9 +107,11 @@ export function computeAll(expenses = [], extraIncome = [], today = null) {
   for (let m = 0; m < HORIZON; m++) {
     const monthName = MONTHS_NAMES[m]
 
-    // Receitas do mês (vindas do banco)
+    // Receitas do mês (vindas do banco). Fixa mensal = todo mês a partir do início.
     const monthIncome = extraIncome
-      .filter(inc => m >= inc.start_month && m < inc.start_month + (inc.total_months || 1))
+      .filter(inc => inc.is_recurring
+        ? m >= inc.start_month
+        : (m >= inc.start_month && m < inc.start_month + (inc.total_months || 1)))
       .map(inc => ({
         label: inc.description,
         amount: parseFloat(inc.amount),
@@ -122,7 +136,11 @@ export function computeAll(expenses = [], extraIncome = [], today = null) {
     // Despesas ativas no mês
     const activeExpenses = expenses.map(exp => {
       const { start_month, total_installments, installment_offset = 1 } = exp
-      if (m >= start_month && m < start_month + total_installments) {
+      // Fixa mensal: ativa do início até o fim do horizonte (sem parcelas).
+      const activeNow = exp.is_recurring
+        ? m >= start_month
+        : (m >= start_month && m < start_month + total_installments)
+      if (activeNow) {
         const c_name = CARD_META[exp.card]?.name || exp.card
         const current_inst = (m - start_month) + installment_offset
         const desc = exp.is_fee
@@ -136,8 +154,8 @@ export function computeAll(expenses = [], extraIncome = [], today = null) {
           cardName: c_name,
           desc,
           amount: parseFloat(exp.amount),
-          instStr: exp.is_fee ? '—' : `${current_inst}/${total_installments}`,
-          payDay: exp.pay_day || CARD_META[exp.card]?.payDay || 10,
+          instStr: exp.is_fee ? '—' : (exp.is_recurring ? 'fixa' : `${current_inst}/${total_installments}`),
+          payDay: payDayFor(exp),
           isNubank: exp.card === 'nubank',
           isFee: !!exp.is_fee,
           category: exp.category || null,

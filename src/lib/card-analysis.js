@@ -20,7 +20,8 @@ function monthlyInvoices(expenses, card) {
     const start = exp.start_month || 0
     const total = exp.total_installments || 1
     const amount = parseFloat(exp.amount) || 0
-    for (let m = Math.max(0, start); m < start + total && m < HORIZON; m++) {
+    const end = exp.is_recurring ? HORIZON : Math.min(start + total, HORIZON)
+    for (let m = Math.max(0, start); m < end; m++) {
       months[m] += amount
     }
   }
@@ -47,7 +48,7 @@ export function analyzeCard(expenses, card, currentMonth = 0) {
   const openPlans = cardExpenses.filter(e => {
     const start = e.start_month || 0
     const total = e.total_installments || 1
-    return !e.is_fee && start + total - 1 >= currentMonth
+    return !e.is_fee && (e.is_recurring || start + total - 1 >= currentMonth)
   })
 
   // Melhor dia de compra: logo após o fechamento (maximiza o prazo de pagamento).

@@ -9,13 +9,14 @@ export default async function HistoricoPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [{ data: expenses }, { data: incomes }] = await Promise.all([
+  const [{ data: expenses }, { data: incomes }, { data: cards }] = await Promise.all([
     supabase.from('expenses').select('*').eq('user_id', user.id),
     supabase.from('extra_income').select('*').eq('user_id', user.id),
+    supabase.from('cards').select('*').eq('user_id', user.id),
   ])
 
   const realMonth = monthIdxForDate()
-  const metrics = computeAll(expenses || [], incomes || [], new Date())
+  const metrics = computeAll(expenses || [], incomes || [], new Date(), cards || [])
   const past = metrics.filter(m => m.idx < realMonth).reverse() // mais recente primeiro
 
   return (

@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase-browser'
-import { IconSparkles, IconStar, IconSend, IconTrash } from '@/lib/icons'
+import { IconSparkles, IconStar, IconSend, IconTrash, IconPaperclip, IconClose } from '@/lib/icons'
 
 const EXAMPLES = [
   'Quanto eu gasto por mês somando todos os cartões?',
@@ -11,6 +11,9 @@ const EXAMPLES = [
   'Qual cartão está mais apertado em relação ao limite?',
   'Se eu atrasar a fatura do Nubank 5 dias, quanto pago de juros?',
 ]
+
+const MAX_FILE_MB = 10
+const ACCEPTED_EXT = ['pdf', 'csv', 'ofx', 'txt']
 
 // Renderiza markdown simples (negrito, listas, parágrafos) como JSX seguro.
 function renderInline(text, kp) {
@@ -53,27 +56,57 @@ export default function ChatClient({ initialMessages, userId, userName }) {
   const [filterStarred, setFilterStarred] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
   const [actionMsg, setActionMsg] = useState(null) // mensagem aberta no menu (segurar/botão direito)
+  const [attachment, setAttachment] = useState(null) // { name, mimeType, data(base64) }
 
   const threadRef = useRef(null)
   const inputRef = useRef(null)
+  const fileRef = useRef(null)
   const pressTimer = useRef(null)
+
+  // Lê o arquivo escolhido e guarda em base64 (vai junto da próxima mensagem).
+  const onPickFile = (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = '' // permite escolher o mesmo arquivo de novo
+    if (!file) return
+    const ext = (file.name.split('.').pop() || '').toLowerCase()
+    if (!ACCEPTED_EXT.includes(ext)) {
+      setError('Arquivo não suportado. Envie PDF, CSV, OFX ou TXT.')
+      return
+    }
+    if (file.size > MAX_FILE_MB * 1024 * 1024) {
+      setError(`Arquivo muito grande (máx. ${MAX_FILE_MB} MB).`)
+      return
+    }
+    setError(null)
+    const reader = new FileReader()
+    reader.onload = () => {
+      const base64 = String(reader.result).split(',')[1] || ''
+      setAttachment({ name: file.name, mimeType: file.type || 'application/octet-stream', data: base64 })
+    }
+    reader.onerror = () => setError('Não consegui ler o arquivo.')
+    reader.readAsDataURL(file)
+  }
 
   useEffect(() => {
     if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight
   }, [messages, pendingUser, sending])
 
   const send = async (textArg) => {
-    const text = (textArg ?? input).trim()
+    let text = (textArg ?? input).trim()
+    // Só com anexo (sem texto): usa um pedido padrão de organização.
+    if (text.length < 2 && attachment) text = 'Organize os lançamentos deste arquivo pra mim.'
     if (text.length < 2 || sending) return
+    const attach = attachment
     setInput('')
+    setAttachment(null)
     setError(null)
-    setPendingUser(text)
+    setPendingUser(attach ? `${text}\n\n📎 ${attach.name}` : text)
     setSending(true)
     try {
       const res = await fetch('/api/gemini', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userText: text }),
+        body: JSON.stringify({ userText: text, attachment: attach || undefined }),
       })
       const result = await res.json()
       if (!res.ok) throw new Error(result.error || 'Erro na IA')
@@ -201,20 +234,34 @@ export default function ChatClient({ initialMessages, userId, userName }) {
         {error && <div className="ai-feedback error" style={{ alignSelf: 'flex-start' }}>Erro: {error}</div>}
       </div>
 
-      <div className="chat-input-bar">
-        <textarea
-          ref={inputRef}
-          className="chat-input"
-          rows={1}
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder="Escreva sua mensagem…"
-          disabled={sending}
-        />
-        <button className="chat-send" onClick={() => send()} disabled={sending || input.trim().length < 2} aria-label="Enviar">
-          <IconSend size={18} />
-        </button>
+      <div className="chat-input-wrap">
+        {attachment && (
+          <div className="chat-attach-chip">
+            <IconPaperclip size={13} />
+            <span className="chat-attach-name">{attachment.name}</span>
+            <button className="chat-attach-x" onClick={() => setAttachment(null)} aria-label="Remover anexo"><IconClose size={12} /></button>
+          </div>
+        )}
+        <div className="chat-input-bar">
+          <input ref={fileRef} type="file" accept=".pdf,.csv,.ofx,.txt" onChange={onPickFile} style={{ display: 'none' }} />
+          <button className="chat-attach-btn" onClick={() => fileRef.current?.click()} disabled={sending}
+            title="Anexar extrato ou fatura (PDF, CSV, OFX, TXT)" aria-label="Anexar arquivo">
+            <IconPaperclip size={17} />
+          </button>
+          <textarea
+            ref={inputRef}
+            className="chat-input"
+            rows={1}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder={attachment ? 'Diga o que fazer com o arquivo (ou só envie)…' : 'Escreva sua mensagem…'}
+            disabled={sending}
+          />
+          <button className="chat-send" onClick={() => send()} disabled={sending || (input.trim().length < 2 && !attachment)} aria-label="Enviar">
+            <IconSend size={18} />
+          </button>
+        </div>
       </div>
 
       {/* Confirmar limpeza */}

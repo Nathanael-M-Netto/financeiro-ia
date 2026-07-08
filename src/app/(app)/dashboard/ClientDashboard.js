@@ -38,7 +38,7 @@ function CategoryDonut({ data, total, selected, onSelect }) {
   )
 }
 
-export default function ClientDashboard({ initialExpenses, initialIncome }) {
+export default function ClientDashboard({ initialExpenses, initialIncome, initialGoals = [], initialBudgets = [], initialCards = [] }) {
   // A data real só é lida no cliente, após montar — assim o HTML do servidor e o
   // primeiro render do cliente são idênticos (sem divergência de hidratação).
   const [today, setToday] = useState(null)
@@ -58,8 +58,8 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
   }, [])
 
   const metrics = useMemo(
-    () => computeAll(initialExpenses, initialIncome, today),
-    [initialExpenses, initialIncome, today]
+    () => computeAll(initialExpenses, initialIncome, today, initialCards),
+    [initialExpenses, initialIncome, today, initialCards]
   )
   const currentMetric = metrics[currentMonth]
   const todayDay = today ? today.getDate() : null
@@ -79,12 +79,127 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
   const supabase = createClient()
   const [paidBusy, setPaidBusy] = useState(false)
 
+  // ── Metas de economia ──────────────────────────────────────
+  const [goals, setGoals] = useState(initialGoals)
+  const [goalModal, setGoalModal] = useState(false)
+  const [goalForm, setGoalForm] = useState({ name: '', target_amount: '', target_month: '' })
+  const [goalBusy, setGoalBusy] = useState(false)
+  const [goalError, setGoalError] = useState(null)
+
+  const saveGoal = async () => {
+    const amount = Number(goalForm.target_amount)
+    const tMonth = parseInt(goalForm.target_month, 10)
+    if (!goalForm.name.trim()) { setGoalError('Dê um nome pra meta.'); return }
+    if (!isFinite(amount) || amount <= 0) { setGoalError('Valor da meta inválido.'); return }
+    if (isNaN(tMonth)) { setGoalError('Escolha o mês alvo.'); return }
+    setGoalBusy(true)
+    setGoalError(null)
+    const { data: { session } } = await supabase.auth.getSession()
+    const { data, error } = await supabase.from('goals')
+      .insert({ user_id: session?.user?.id, name: goalForm.name.trim(), target_amount: amount, target_month: tMonth })
+      .select().single()
+    setGoalBusy(false)
+    if (error) { setGoalError(error.message); return }
+    setGoals(g => [...g, data].sort((a, b) => a.target_month - b.target_month))
+    setGoalForm({ name: '', target_amount: '', target_month: '' })
+    setGoalModal(false)
+  }
+
+  const deleteGoal = async (id) => {
+    setGoals(g => g.filter(x => x.id !== id))
+    await supabase.from('goals').delete().eq('id', id)
+  }
+
+  // ── Orçamentos por categoria ───────────────────────────────
+  const [budgets, setBudgets] = useState(initialBudgets)
+  const [budgetModal, setBudgetModal] = useState(false)
+  const [budgetDraft, setBudgetDraft] = useState({}) // { categoria: "600" }
+  const [budgetBusy, setBudgetBusy] = useState(false)
+  const [budgetError, setBudgetError] = useState(null)
+
+  const openBudgets = () => {
+    const d = {}
+    budgets.forEach(b => { d[b.category] = String(b.monthly_limit) })
+    setBudgetDraft(d)
+    setBudgetError(null)
+    setBudgetModal(true)
+  }
+
+  const saveBudgets = async () => {
+    setBudgetBusy(true)
+    setBudgetError(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const uid = session?.user?.id
+      for (const cat of Object.keys(CATEGORY_META)) {
+        const raw = (budgetDraft[cat] ?? '').toString().trim()
+        const existing = budgets.find(b => b.category === cat)
+        const val = Number(raw)
+        if (raw !== '' && (!isFinite(val) || val < 0)) throw new Error(`Valor inválido em ${CATEGORY_META[cat].name}.`)
+        if (raw === '' || val === 0) {
+          if (existing) await supabase.from('budgets').delete().eq('id', existing.id)
+        } else if (existing) {
+          if (parseFloat(existing.monthly_limit) !== val) {
+            await supabase.from('budgets').update({ monthly_limit: val }).eq('id', existing.id)
+          }
+        } else {
+          await supabase.from('budgets').insert({ user_id: uid, category: cat, monthly_limit: val })
+        }
+      }
+      const { data: fresh } = await supabase.from('budgets').select('*').eq('user_id', uid)
+      setBudgets(fresh || [])
+      setBudgetModal(false)
+    } catch (e) {
+      setBudgetError(/relation .*budgets|does not exist/i.test(e.message || '')
+        ? 'Rode a migration 0007 no Supabase para ativar os orçamentos.'
+        : e.message)
+    } finally {
+      setBudgetBusy(false)
+    }
+  }
+
+  // Gasto do mês selecionado por categoria (para as barras de orçamento).
+  const spentByCat = useMemo(() => {
+    const map = {}
+    currentMetric.expensesList.forEach(e => {
+      const key = e.category || 'outros'
+      map[key] = (map[key] || 0) + e.amount
+    })
+    return map
+  }, [currentMetric])
+
+  // ── Termômetro financeiro (0–100, transparente) ────────────
+  const health = useMemo(() => {
+    if (!hasData) return null
+    const cur = metrics[realMonth] || currentMetric
+    const notes = []
+    let score = 100
+    if (cur.totalIn > 0) {
+      const ratio = cur.totalOut / cur.totalIn
+      if (ratio > 0.9) { score -= 40; notes.push(`Saídas consomem ${Math.round(ratio * 100)}% das entradas (-40)`) }
+      else if (ratio > 0.75) { score -= 25; notes.push(`Saídas consomem ${Math.round(ratio * 100)}% das entradas (-25)`) }
+      else if (ratio > 0.5) { score -= 10; notes.push(`Saídas consomem ${Math.round(ratio * 100)}% das entradas (-10)`) }
+      else { notes.push(`Saídas consomem só ${Math.round(ratio * 100)}% das entradas`) }
+    }
+    const negs = windowMetrics.filter(m => m.balance < 0).length
+    if (negs > 0) { const pen = Math.min(45, negs * 15); score -= pen; notes.push(`${negs} mês(es) no negativo à frente (-${pen})`) }
+    if (cur.overdueAmount > 0) { score -= 15; notes.push(`Contas vencidas sem pagar: ${formatCurrency(cur.overdueAmount)} (-15)`) }
+    score = Math.max(0, Math.min(100, Math.round(score)))
+    const tone = score >= 80 ? 'pos' : score >= 55 ? 'warn' : 'neg'
+    const label = score >= 80 ? 'Saudável' : score >= 55 ? 'Atenção' : 'Crítico'
+    return { score, tone, label, notes }
+  }, [hasData, metrics, realMonth, currentMetric, windowMetrics])
+
   // Marca/desmarca uma despesa como paga no mês visualizado (paid_through).
   const togglePaid = async (item) => {
     if (paidBusy || !item.id) return
     setPaidBusy(true)
     const newVal = item.isPaid ? (currentMonth > 0 ? currentMonth - 1 : null) : currentMonth
-    await supabase.from('expenses').update({ paid_through: newVal }).eq('id', item.id)
+    // Filtro extra por user_id (além da RLS) — defesa em profundidade.
+    const { data: { session } } = await supabase.auth.getSession()
+    let q = supabase.from('expenses').update({ paid_through: newVal }).eq('id', item.id)
+    if (session?.user?.id) q = q.eq('user_id', session.user.id)
+    await q
     router.refresh()
     setPaidBusy(false)
   }
@@ -121,6 +236,35 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
     const total = arr.reduce((s, c) => s + c.total, 0)
     return { arr, total }
   }, [currentMetric])
+
+  // Insights automáticos do mês selecionado (comparações mês a mês).
+  const insights = useMemo(() => {
+    const out = []
+    const cur = metrics[currentMonth]
+    const prev = currentMonth > 0 ? metrics[currentMonth - 1] : null
+    // Saídas vs mês anterior
+    if (prev && prev.totalOut > 0 && cur.totalOut > 0) {
+      const pct = Math.round(((cur.totalOut - prev.totalOut) / prev.totalOut) * 100)
+      if (Math.abs(pct) >= 5) {
+        out.push({ tone: pct > 0 ? 'warn' : 'pos', text: `Saídas ${Math.abs(pct)}% ${pct > 0 ? 'acima' : 'abaixo'} de ${prev.monthName} (${formatCurrency(cur.totalOut)} vs ${formatCurrency(prev.totalOut)}).` })
+      }
+    }
+    // Maior categoria do mês
+    if (byCategory.arr.length > 0 && byCategory.total > 0) {
+      const top = byCategory.arr[0]
+      const meta = CATEGORY_META[top.key] || CATEGORY_META.outros
+      out.push({ tone: 'info', text: `Maior gasto: ${meta.name} — ${formatCurrency(top.total)} (${Math.round((top.total / byCategory.total) * 100)}% do mês).` })
+    }
+    // Mês negativo à frente (ou o mais apertado, se nenhum negativo)
+    const firstNeg = windowMetrics.find(m => m.balance < 0)
+    if (firstNeg) {
+      out.push({ tone: 'neg', text: `Atenção: ${firstNeg.monthName} fecha no negativo (${formatCurrency(firstNeg.balance)}).` })
+    } else if (windowMetrics.length > 1) {
+      const tight = windowMetrics.reduce((a, b) => (b.balance < a.balance ? b : a), windowMetrics[0])
+      out.push({ tone: 'info', text: `Mês mais apertado à frente: ${tight.monthName} (saldo ${formatCurrency(tight.balance)}).` })
+    }
+    return out
+  }, [metrics, currentMonth, windowMetrics, byCategory])
 
   return (
     <div className={`page anim ${showDetails ? '' : 'mobile-collapsed'}`}>
@@ -247,6 +391,133 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
         </div>
       </section>
       </>)}
+
+      {hasData && (health || insights.length > 0) && (
+        <section className="dash-duo dash-detail">
+          {health && (
+            <div className="card health-card">
+              <div className="card-body">
+                <div className="timeline-title">Termômetro financeiro</div>
+                <div className="health-main">
+                  <div className={`health-score health-${health.tone}`}>
+                    <span className="health-num">{health.score}</span>
+                    <span className="health-max">/100</span>
+                  </div>
+                  <div className={`health-label health-${health.tone}`}>{health.label}</div>
+                </div>
+                <div className="health-bar"><div className={`health-fill health-${health.tone}`} style={{ width: `${health.score}%` }} /></div>
+                <div className="health-notes">
+                  {health.notes.map((n, i) => <div key={i} className="health-note">• {n}</div>)}
+                </div>
+              </div>
+            </div>
+          )}
+          {insights.length > 0 && (
+            <div className="card insights-card">
+              <div className="card-body">
+                <div className="timeline-title">Insights — {currentMetric.monthName}</div>
+                <div className="insights-list">
+                  {insights.map((ins, i) => (
+                    <div key={i} className={`insight-row insight-${ins.tone}`}>
+                      <span className="insight-dot" />
+                      <span>{ins.text}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Orçamentos por categoria */}
+      {hasData && (
+        <section className="card budgets-card dash-detail">
+          <div className="card-header">
+            <span className="timeline-title" style={{ marginBottom: 0 }}>Orçamentos — {currentMetric.monthName}</span>
+            <button className="btn-ghost" onClick={openBudgets}>Definir tetos</button>
+          </div>
+          <div className="card-body">
+            {budgets.length === 0 ? (
+              <div className="goals-empty">Defina um teto de gasto por categoria (ex.: Alimentação até R$ 600/mês) e acompanhe aqui.</div>
+            ) : (
+              <div className="budget-list">
+                {budgets
+                  .slice()
+                  .sort((a, b) => (spentByCat[b.category] || 0) / b.monthly_limit - (spentByCat[a.category] || 0) / a.monthly_limit)
+                  .map(b => {
+                    const meta = CATEGORY_META[b.category] || CATEGORY_META.outros
+                    const limit = parseFloat(b.monthly_limit) || 0
+                    const spent = spentByCat[b.category] || 0
+                    const pct = limit > 0 ? (spent / limit) * 100 : 0
+                    const tone = pct >= 100 ? 'neg' : pct >= 70 ? 'warn' : 'pos'
+                    return (
+                      <div key={b.id} className="budget-row">
+                        <div className="budget-head">
+                          <span className="budget-name"><span className="budget-dot" style={{ background: meta.color }} />{meta.name}</span>
+                          <span className="budget-nums">{formatCurrency(spent)} / {formatCurrency(limit)}</span>
+                        </div>
+                        <div className="budget-bar"><div className={`budget-fill bf-${tone}`} style={{ width: `${Math.min(100, pct)}%` }} /></div>
+                        <div className={`budget-sub bs-${tone}`}>
+                          {pct >= 100 ? `Estourou ${formatCurrency(spent - limit)} (${Math.round(pct)}%)` : `${Math.round(pct)}% usado · sobra ${formatCurrency(limit - spent)}`}
+                        </div>
+                      </div>
+                    )
+                  })}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* Metas de economia */}
+      {hasData && (
+        <section className="card goals-card dash-detail">
+          <div className="card-header">
+            <span className="timeline-title" style={{ marginBottom: 0 }}>Metas de economia</span>
+            <button className="btn-ghost" onClick={() => { setGoalError(null); setGoalModal(true) }}>+ Nova meta</button>
+          </div>
+          <div className="card-body">
+            {goals.length === 0 ? (
+              <div className="goals-empty">Nenhuma meta ainda. Ex.: “Juntar R$ 5.000 até Dezembro”.</div>
+            ) : (
+              <div className="goals-list">
+                {goals.map(g => {
+                  const target = parseFloat(g.target_amount) || 0
+                  const projected = metrics[g.target_month]?.balance ?? 0
+                  const pct = target > 0 ? Math.max(0, Math.min(100, (projected / target) * 100)) : 0
+                  const hit = projected >= target
+                  const late = g.target_month < realMonth
+                  return (
+                    <div key={g.id} className="goal-row">
+                      <div className="goal-head">
+                        <div className="goal-name">
+                          {g.name}
+                          <span className="goal-when">até {metrics[g.target_month]?.monthName || '—'}</span>
+                          {late && <span className="goal-late">mês já passou</span>}
+                        </div>
+                        <div className="goal-nums">
+                          <strong style={{ color: hit ? 'var(--pos)' : 'var(--text)' }}>{formatCurrency(projected)}</strong>
+                          <span> / {formatCurrency(target)}</span>
+                          <button className="goal-del" onClick={() => deleteGoal(g.id)} title="Excluir meta">✕</button>
+                        </div>
+                      </div>
+                      <div className="goal-bar">
+                        <div className={`goal-fill ${hit ? 'hit' : ''}`} style={{ width: `${pct}%` }} />
+                      </div>
+                      <div className="goal-sub">
+                        {hit
+                          ? `Meta batida na projeção — sobra ${formatCurrency(projected - target)} 🎉`
+                          : `Faltam ${formatCurrency(target - projected)} na projeção de ${metrics[g.target_month]?.monthName || '—'} (${Math.round(pct)}%)`}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       {hasData && (
         <section className="dash-grid dash-detail">
@@ -488,6 +759,77 @@ export default function ClientDashboard({ initialExpenses, initialIncome }) {
           </div>
         </section>
       )}
+
+      {/* Modal: orçamentos por categoria */}
+      <div className={`modal-backdrop ${budgetModal ? 'open' : ''}`}>
+        <div className="modal-box" style={{ maxWidth: '440px' }}>
+          <div className="modal-hd">
+            <div style={{ fontWeight: 800, fontSize: '.9rem', color: '#fff' }}>Tetos de gasto por categoria</div>
+            <button className="modal-close" onClick={() => setBudgetModal(false)}>✕</button>
+          </div>
+          <div className="modal-bd">
+            <p style={{ fontSize: '.78rem', color: 'var(--text2)', lineHeight: 1.5, marginBottom: '12px' }}>
+              Quanto você quer gastar <strong style={{ color: 'var(--text)' }}>no máximo por mês</strong> em cada categoria. Deixe em branco para não acompanhar.
+            </p>
+            <div className="budget-edit-grid">
+              {Object.keys(CATEGORY_META).map(cat => (
+                <div key={cat} className="budget-edit-row">
+                  <span className="budget-name"><span className="budget-dot" style={{ background: CATEGORY_META[cat].color }} />{CATEGORY_META[cat].name}</span>
+                  <input className="form-input budget-edit-input" type="number" min="0" step="10" placeholder="—"
+                    value={budgetDraft[cat] ?? ''}
+                    onChange={e => setBudgetDraft(d => ({ ...d, [cat]: e.target.value }))} />
+                </div>
+              ))}
+            </div>
+            {budgetError && <div className="form-hint hint-warn" style={{ marginTop: '10px' }}>{budgetError}</div>}
+          </div>
+          <div className="modal-ft">
+            <button className="nav-btn" onClick={() => setBudgetModal(false)}>Cancelar</button>
+            <button className="btn-ai" onClick={saveBudgets} disabled={budgetBusy}>{budgetBusy ? 'Salvando...' : 'Salvar tetos'}</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Modal: nova meta */}
+      <div className={`modal-backdrop ${goalModal ? 'open' : ''}`}>
+        <div className="modal-box" style={{ maxWidth: '420px' }}>
+          <div className="modal-hd">
+            <div style={{ fontWeight: 800, fontSize: '.9rem', color: '#fff' }}>Nova meta de economia</div>
+            <button className="modal-close" onClick={() => setGoalModal(false)}>✕</button>
+          </div>
+          <div className="modal-bd">
+            <div className="form-group">
+              <label className="form-label">Nome da meta</label>
+              <input className="form-input" maxLength={60} value={goalForm.name}
+                onChange={e => setGoalForm({ ...goalForm, name: e.target.value })}
+                placeholder="Ex: Reserva de emergência, Viagem..." />
+            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">Quero ter (R$)</label>
+                <input className="form-input" type="number" min="0" step="0.01" value={goalForm.target_amount}
+                  onChange={e => setGoalForm({ ...goalForm, target_amount: e.target.value })} placeholder="5000" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Até quando</label>
+                <select className="form-input" value={goalForm.target_month}
+                  onChange={e => setGoalForm({ ...goalForm, target_month: e.target.value })}>
+                  <option value="">Escolha o mês</option>
+                  {windowMetrics.map(m => <option key={m.idx} value={m.idx}>{m.monthName}</option>)}
+                </select>
+              </div>
+            </div>
+            <p style={{ fontSize: '.75rem', color: 'var(--text2)', lineHeight: 1.5 }}>
+              A meta é comparada com o <strong style={{ color: 'var(--text)' }}>saldo projetado</strong> do mês escolhido.
+            </p>
+            {goalError && <div className="form-hint hint-warn">{goalError}</div>}
+          </div>
+          <div className="modal-ft">
+            <button className="nav-btn" onClick={() => setGoalModal(false)}>Cancelar</button>
+            <button className="btn-ai" onClick={saveGoal} disabled={goalBusy}>{goalBusy ? 'Salvando...' : 'Criar meta'}</button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
