@@ -1578,3 +1578,8 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 
 /* Botão instalar: alinhar ícone e texto */
 .app-install-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+
+/* Tendência do saldo: sem meses negativos, a metade de baixo colapsa e as
+   barras usam a altura inteira (nada de vão até os rótulos). */
+.trend-chart.no-neg { height: 132px; }
+.trend-chart.no-neg .trend-bot { display: none; }

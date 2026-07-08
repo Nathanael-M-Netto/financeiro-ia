@@ -574,16 +574,17 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
           <div className="card chart-card">
             <div className="card-body">
               <div className="timeline-title">Tendência do saldo — próximos {windowMetrics.length} meses</div>
-              <div className="trend-chart">
+              {/* Sem mês negativo na janela, a metade de baixo some (barras usam a altura toda). */}
+              <div className={`trend-chart ${windowMetrics.some(m => m.balance < 0) ? '' : 'no-neg'}`}>
                 {windowMetrics.map((m) => {
                   const v = m.balance
                   const h = Math.round((Math.abs(v) / trendMaxAbs) * 100)
                   const pos = v >= 0
                   return (
                     <button key={m.idx} className={`trend-col ${currentMonth === m.idx ? 'active' : ''}`} onClick={() => setCurrentMonth(m.idx)} title={`${m.monthName}: ${formatCurrency(v)}`}>
-                      <div className="trend-top"><div className="trend-bar pos" style={{ height: pos ? `${h}%` : '0%' }} /></div>
+                      <div className="trend-top">{pos && v > 0 && <div className="trend-bar pos" style={{ height: `${h}%` }} />}</div>
                       <div className="trend-mid" />
-                      <div className="trend-bot"><div className="trend-bar neg" style={{ height: !pos ? `${h}%` : '0%' }} /></div>
+                      <div className="trend-bot">{!pos && <div className="trend-bar neg" style={{ height: `${h}%` }} />}</div>
                       <span className="trend-lbl">{monthBaseName(m.idx).slice(0, 3)}</span>
                     </button>
                   )
