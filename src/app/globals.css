@@ -1522,3 +1522,19 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 .budget-total .budget-name { font-size: .9rem; font-weight: 800; }
 .budget-edit-total { padding-bottom: 10px; border-bottom: 1px dashed var(--border2); margin-bottom: 10px; }
 .budget-edit-total .budget-name { font-weight: 800; }
+
+/* ═══════════════════════════════════════
+   Mobile: alvos de toque confortáveis (auditoria PWA)
+═══════════════════════════════════════ */
+@media (max-width: 900px) {
+  .pay-toggle { width: 30px; height: 30px; border-radius: 8px; }
+  .modal-close { width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center; font-size: 1rem; }
+  .app-close-btn { padding: 10px; margin: -10px; margin-left: auto; }
+  .detail-close { padding: 10px; margin: -8px; }
+  .goal-del { padding: 8px 10px; }
+  .chat-attach-x { padding: 6px; }
+}
+/* Gráfico do cartão: em telas estreitas os valores de 12 colunas se sobrepõem */
+@media (max-width: 560px) {
+  .month-bar-val { display: none; }
+}
