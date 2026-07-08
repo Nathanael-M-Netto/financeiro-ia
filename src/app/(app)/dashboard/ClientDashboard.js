@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useMemo, useEffect } from 'react'
+import React, { useState, useMemo, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { computeAll, formatCurrency, monthIdxForDate } from '@/lib/finance-engine'
 import { createClient } from '@/lib/supabase-browser'
@@ -206,6 +206,23 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
   }
 
   const alertIcon = (type) => (type === 'pos' ? <IconCheck size={16} /> : <IconAlert size={16} />)
+
+  // Linha do tempo: abre já posicionada no dia de HOJE (dá pra scrollar pra
+  // trás quando quiser ver o começo do mês). Re-posiciona ao trocar de mês e
+  // ao abrir "Ver detalhes" no mobile (o container nasce escondido lá).
+  const timelineRef = useRef(null)
+  useEffect(() => {
+    const el = timelineRef.current
+    if (!el || !today) return
+    if (currentMonth !== realMonth) { el.scrollLeft = 0; return }
+    const d = today.getDate()
+    const evs = [...el.querySelectorAll('[data-day]')]
+    const target = evs.find(ev => Number(ev.dataset.day) >= d) || evs[evs.length - 1]
+    if (target && el.clientWidth > 0) {
+      const delta = target.getBoundingClientRect().left - el.getBoundingClientRect().left
+      el.scrollLeft = Math.max(0, el.scrollLeft + delta - 8)
+    }
+  }, [today, currentMonth, realMonth, metrics, showDetails])
 
   // Escala do gráfico de tendência (maior saldo absoluto na janela visível).
   const trendMaxAbs = useMemo(
@@ -645,7 +662,7 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
           <div className="timeline-title" style={{ marginBottom: 0 }}>Linha do tempo — {currentMetric.monthName}</div>
           {currentMetric.isCurrent && todayDay && <span className="today-chip">Hoje · dia {todayDay}</span>}
         </div>
-        <div className="timeline-scroll">
+        <div className="timeline-scroll" ref={timelineRef}>
           <div className="timeline-events">
             {currentMetric.timelineEvents.length === 0 && (
               <div style={{ color: 'var(--text2)', fontSize: '.8rem', padding: '4px 0' }}>Nenhum evento neste mês.</div>
@@ -653,7 +670,7 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
             {currentMetric.timelineEvents.map((ev, i) => {
               const isOut = ev.type === 'expense' || ev.type === 'late'
               return (
-                <div key={i} className={`tl-ev ${ev.type} st-${ev.status}`}>
+                <div key={i} data-day={ev.day} className={`tl-ev ${ev.type} st-${ev.status}`}>
                   <div className="tl-day">DIA {ev.day}</div>
                   <div className="tl-label">{ev.label}</div>
                   <div className={`tl-amount ${ev.type}`}>{formatCurrency(ev.amount)}</div>

@@ -37,12 +37,25 @@ export function analyzeCard(expenses, card, currentMonth = 0) {
   const peakMonthIdx = months.indexOf(peakInvoice)
 
   const limit = card.credit_limit ? parseFloat(card.credit_limit) : null
-  const utilizationPct = limit && limit > 0 ? (currentInvoice / limit) * 100 : null
-  const peakUtilizationPct = limit && limit > 0 ? (peakInvoice / limit) * 100 : null
 
-  // Total ainda a pagar do mês atual em diante.
+  // Total ainda a pagar = parcelas do mês atual em diante que NÃO estão pagas.
+  // É isso que compromete o limite de verdade (fatura paga libera o limite).
+  // Despesa fixa (assinatura) compromete só 1 ciclo — o mês corrente.
   let remaining = 0
-  for (let m = currentMonth; m < HORIZON; m++) remaining += months[m]
+  for (const exp of cardExpenses) {
+    const start = exp.start_month || 0
+    const amount = parseFloat(exp.amount) || 0
+    const end = exp.is_recurring
+      ? Math.min(Math.max(currentMonth + 1, start + 1), HORIZON)
+      : Math.min(start + (exp.total_installments || 1), HORIZON)
+    for (let m = Math.max(currentMonth, start); m < end; m++) {
+      const paid = exp.paid_through != null && m <= exp.paid_through
+      if (!paid) remaining += amount
+    }
+  }
+
+  const utilizationPct = limit && limit > 0 ? (remaining / limit) * 100 : null
+  const peakUtilizationPct = limit && limit > 0 ? (peakInvoice / limit) * 100 : null
 
   // Planos (não-juros) com parcela em aberto do mês atual em diante.
   const openPlans = cardExpenses.filter(e => {

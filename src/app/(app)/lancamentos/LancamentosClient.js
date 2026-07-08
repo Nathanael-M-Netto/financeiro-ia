@@ -457,7 +457,7 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
               ) : fExpenses.length === 0 ? (
                 <div className="lanc-empty">Nenhuma despesa com esses filtros.</div>
               ) : (
-                <table className="exp-table exp-table-rows">
+                <table className="exp-table exp-table-rows exp-table-despesas">
                   <thead>
                     <tr>
                       <th>Descrição</th>

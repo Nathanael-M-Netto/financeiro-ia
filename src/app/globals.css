@@ -1538,3 +1538,26 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 @media (max-width: 560px) {
   .month-bar-val { display: none; }
 }
+
+/* Lançamentos no mobile: some a coluna "Parc." (fica no painel de detalhes)
+   pra o VALOR nunca ser cortado; células mais compactas. */
+@media (max-width: 760px) {
+  .exp-table-despesas th:nth-child(4),
+  .exp-table-despesas td:nth-child(4) { display: none; }
+  .exp-table-rows th, .exp-table-rows td { padding-left: 8px; padding-right: 8px; }
+  .exp-table-rows .amt-col { white-space: nowrap; font-size: .78rem; }
+  .exp-table-rows .tag { font-size: .6rem; padding: 2px 7px; }
+}
+
+/* Botão "Instalar como app" no menu lateral */
+.app-install-btn {
+  width: 100%; margin-bottom: 10px; padding: 11px 12px;
+  background: var(--info-dim); border: 1px solid rgba(77,131,255,.4); border-radius: var(--r);
+  color: var(--info); font-weight: 700; font-size: .82rem; cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.app-install-btn:hover { background: rgba(77,131,255,.22); border-color: var(--info); }
+
+/* Barras do gráfico do cartão agora são botões (clicáveis) */
+.month-bar-btn { background: none; border: none; padding: 0; cursor: pointer; font-family: inherit; }
+.month-bar-btn.sel .month-bar-label { font-weight: 800; }

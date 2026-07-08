@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase-browser'
@@ -32,6 +32,36 @@ export default function Sidebar({ userName, userEmail }) {
   const router = useRouter()
   const supabase = createClient()
   const [open, setOpen] = useState(false)
+
+  // Instalação do PWA: guarda o prompt do Chrome/Android; no iOS mostra o passo
+  // a passo. Some quando o app já está instalado (modo standalone).
+  const [installEvt, setInstallEvt] = useState(null)
+  const [iosHint, setIosHint] = useState(false)
+  useEffect(() => {
+    const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true
+    if (standalone) return
+    const onPrompt = (e) => { e.preventDefault(); setInstallEvt(e) }
+    const onInstalled = () => { setInstallEvt(null); setIosHint(false) }
+    window.addEventListener('beforeinstallprompt', onPrompt)
+    window.addEventListener('appinstalled', onInstalled)
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (/iphone|ipad|ipod/i.test(navigator.userAgent)) setIosHint(true)
+    /* eslint-enable react-hooks/set-state-in-effect */
+    return () => {
+      window.removeEventListener('beforeinstallprompt', onPrompt)
+      window.removeEventListener('appinstalled', onInstalled)
+    }
+  }, [])
+
+  const installApp = async () => {
+    if (installEvt) {
+      installEvt.prompt()
+      const { outcome } = await installEvt.userChoice
+      if (outcome === 'accepted') setInstallEvt(null)
+    } else if (iosHint) {
+      alert('Para instalar no iPhone:\n\n1. Toque no botão Compartilhar (quadrado com seta) na barra do Safari\n2. Escolha "Adicionar à Tela de Início"\n3. Confirme — o FinDash vira um app 📲')
+    }
+  }
 
   const logout = async () => {
     await supabase.auth.signOut()
@@ -80,6 +110,11 @@ export default function Sidebar({ userName, userEmail }) {
         </nav>
 
         <div className="app-sidebar-footer">
+          {(installEvt || iosHint) && (
+            <button className="app-install-btn" onClick={installApp}>
+              📲 Instalar como app
+            </button>
+          )}
           <div className="app-user">
             <div className="app-user-avatar">{initial}</div>
             <div className="app-user-meta">
