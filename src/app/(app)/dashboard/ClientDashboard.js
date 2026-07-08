@@ -131,11 +131,12 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
     try {
       const { data: { session } } = await supabase.auth.getSession()
       const uid = session?.user?.id
-      for (const cat of Object.keys(CATEGORY_META)) {
+      // '_total' = teto GERAL do mês (todas as categorias somadas)
+      for (const cat of ['_total', ...Object.keys(CATEGORY_META)]) {
         const raw = (budgetDraft[cat] ?? '').toString().trim()
         const existing = budgets.find(b => b.category === cat)
         const val = Number(raw)
-        if (raw !== '' && (!isFinite(val) || val < 0)) throw new Error(`Valor inválido em ${CATEGORY_META[cat].name}.`)
+        if (raw !== '' && (!isFinite(val) || val < 0)) throw new Error(`Valor inválido em ${cat === '_total' ? 'Teto geral' : CATEGORY_META[cat].name}.`)
         if (raw === '' || val === 0) {
           if (existing) await supabase.from('budgets').delete().eq('id', existing.id)
         } else if (existing) {
@@ -327,16 +328,19 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
       </div>
       )}
 
-      {/* Grana atual em destaque, no topo (compacto) */}
+      {/* Grana atual em destaque, no topo (compacto). Só conta o que JÁ caiu. */}
       {hasData && currentMetric.isCurrent && (
         <div className="grana-top">
           <div className="grana-top-main">
             <span className="grana-top-label">Grana atual — agora</span>
             <span className="grana-top-val">{formatCurrency(currentMetric.saldoAtual)}</span>
           </div>
-          {currentMetric.pendingPay > 0
-            ? <span className="grana-top-sub">ainda falta pagar {formatCurrency(currentMetric.pendingPay)} este mês</span>
-            : <span className="grana-top-sub ok">tudo deste mês está pago</span>}
+          <span className="grana-top-extras">
+            {currentMetric.pendingIn > 0 && <span className="grana-top-sub in">ainda entram {formatCurrency(currentMetric.pendingIn)}</span>}
+            {currentMetric.pendingPay > 0
+              ? <span className="grana-top-sub">falta pagar {formatCurrency(currentMetric.pendingPay)}</span>
+              : <span className="grana-top-sub ok">tudo deste mês está pago</span>}
+          </span>
         </div>
       )}
 
@@ -345,6 +349,9 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
       <div className="mobile-summary">
         {currentMetric.isCurrent && (
           <div className="ms-item"><span>Grana atual</span><strong className="ms-pos">{formatCurrency(currentMetric.saldoAtual)}</strong></div>
+        )}
+        {currentMetric.isCurrent && currentMetric.pendingIn > 0 && (
+          <div className="ms-item"><span>Ainda entra</span><strong className="ms-pos" style={{ opacity: .8 }}>{formatCurrency(currentMetric.pendingIn)}</strong></div>
         )}
         <div className="ms-item"><span>Falta pagar</span><strong className="ms-warn">{formatCurrency(currentMetric.pendingPay)}</strong></div>
         <div className="ms-item"><span>Saldo fim do mês</span><strong style={{ color: currentMetric.balance >= 0 ? 'var(--pos)' : 'var(--neg)' }}>{formatCurrency(currentMetric.balance)}</strong></div>
@@ -438,11 +445,32 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
             <button className="btn-ghost" onClick={openBudgets}>Definir tetos</button>
           </div>
           <div className="card-body">
-            {budgets.length === 0 ? (
+            {(() => {
+              const totalBudget = budgets.find(b => b.category === '_total')
+              if (!totalBudget) return null
+              const limit = parseFloat(totalBudget.monthly_limit) || 0
+              const spent = currentMetric.totalOut
+              const pct = limit > 0 ? (spent / limit) * 100 : 0
+              const tone = pct >= 100 ? 'neg' : pct >= 70 ? 'warn' : 'pos'
+              return (
+                <div className="budget-row budget-total">
+                  <div className="budget-head">
+                    <span className="budget-name">Teto geral do mês</span>
+                    <span className="budget-nums">{formatCurrency(spent)} / {formatCurrency(limit)}</span>
+                  </div>
+                  <div className="budget-bar"><div className={`budget-fill bf-${tone}`} style={{ width: `${Math.min(100, pct)}%` }} /></div>
+                  <div className={`budget-sub bs-${tone}`}>
+                    {pct >= 100 ? `Estourou ${formatCurrency(spent - limit)} (${Math.round(pct)}%)` : `${Math.round(pct)}% usado · dá pra gastar mais ${formatCurrency(limit - spent)} este mês`}
+                  </div>
+                </div>
+              )
+            })()}
+            {budgets.filter(b => b.category !== '_total').length === 0 ? (
               <div className="goals-empty">Defina um teto de gasto por categoria (ex.: Alimentação até R$ 600/mês) e acompanhe aqui.</div>
             ) : (
               <div className="budget-list">
                 {budgets
+                  .filter(b => b.category !== '_total')
                   .slice()
                   .sort((a, b) => (spentByCat[b.category] || 0) / b.monthly_limit - (spentByCat[a.category] || 0) / a.monthly_limit)
                   .map(b => {
@@ -771,6 +799,12 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
             <p style={{ fontSize: '.78rem', color: 'var(--text2)', lineHeight: 1.5, marginBottom: '12px' }}>
               Quanto você quer gastar <strong style={{ color: 'var(--text)' }}>no máximo por mês</strong> em cada categoria. Deixe em branco para não acompanhar.
             </p>
+            <div className="budget-edit-row budget-edit-total">
+              <span className="budget-name">Teto geral do mês</span>
+              <input className="form-input budget-edit-input" type="number" min="0" step="10" placeholder="—"
+                value={budgetDraft['_total'] ?? ''}
+                onChange={e => setBudgetDraft(d => ({ ...d, _total: e.target.value }))} />
+            </div>
             <div className="budget-edit-grid">
               {Object.keys(CATEGORY_META).map(cat => (
                 <div key={cat} className="budget-edit-row">

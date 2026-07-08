@@ -193,7 +193,15 @@ export function computeAll(expenses = [], extraIncome = [], today = null, cards 
       }
     })
     const pendingPay = unpaidOut          // falta pagar = tudo que não está pago
-    const saldoAtual = totalIncome - paidOut // dinheiro que você tem agora (só o pago saiu)
+    // Grana atual = dinheiro que JÁ ENTROU até hoje − o que JÁ SAIU (pago).
+    // Receita com dia futuro (ex.: salário dia 10 quando hoje é dia 7) ainda
+    // não conta — ela aparece separada em `pendingIn` ("ainda entra este mês").
+    const isCurrentMonth = m === currentMonthIdx && hasToday
+    const receivedIn = isCurrentMonth
+      ? incomeThisMonth.reduce((s, i) => s + ((i.day || 1) <= today.getDate() ? i.amount : 0), 0)
+      : totalIncome
+    const pendingIn = totalIncome - receivedIn
+    const saldoAtual = receivedIn - paidOut
 
     metrics.push({
       idx: m,
@@ -214,6 +222,8 @@ export function computeAll(expenses = [], extraIncome = [], today = null, cards 
       paidOut,
       unpaidOut,
       saldoAtual,
+      receivedIn,
+      pendingIn,
     })
 
     carryover = balance
