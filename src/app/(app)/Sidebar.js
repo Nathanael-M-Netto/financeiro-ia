@@ -6,7 +6,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase-browser'
 import {
   IconBrand, IconDashboard, IconReceipt, IconCard, IconSparkles,
-  IconLogout, IconMenu, IconClose, IconClock,
+  IconLogout, IconMenu, IconClose, IconClock, IconDownload,
 } from '@/lib/icons'
 
 const NAV_SECTIONS = [
@@ -59,7 +59,7 @@ export default function Sidebar({ userName, userEmail }) {
       const { outcome } = await installEvt.userChoice
       if (outcome === 'accepted') setInstallEvt(null)
     } else if (iosHint) {
-      alert('Para instalar no iPhone:\n\n1. Toque no botão Compartilhar (quadrado com seta) na barra do Safari\n2. Escolha "Adicionar à Tela de Início"\n3. Confirme — o FinDash vira um app 📲')
+      alert('Para instalar no iPhone:\n\n1. Toque no botão Compartilhar (quadrado com seta) na barra do Safari\n2. Escolha "Adicionar à Tela de Início"\n3. Confirme — o FinDash vira um app')
     }
   }
 
@@ -112,7 +112,7 @@ export default function Sidebar({ userName, userEmail }) {
         <div className="app-sidebar-footer">
           {(installEvt || iosHint) && (
             <button className="app-install-btn" onClick={installApp}>
-              📲 Instalar como app
+              <IconDownload size={15} /> Instalar como app
             </button>
           )}
           <div className="app-user">

@@ -100,7 +100,7 @@ export default function ChatClient({ initialMessages, userId, userName }) {
     setInput('')
     setAttachment(null)
     setError(null)
-    setPendingUser(attach ? `${text}\n\n📎 ${attach.name}` : text)
+    setPendingUser(attach ? `${text}\n\nAnexo: ${attach.name}` : text)
     setSending(true)
     try {
       const res = await fetch('/api/gemini', {

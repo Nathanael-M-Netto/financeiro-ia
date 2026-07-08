@@ -1561,3 +1561,20 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 /* Barras do gráfico do cartão agora são botões (clicáveis) */
 .month-bar-btn { background: none; border: none; padding: 0; cursor: pointer; font-family: inherit; }
 .month-bar-btn.sel .month-bar-label { font-weight: 800; }
+
+/* Meta batida: badge com check + brilho sutil varrendo a barra (sem emoji) */
+.goal-sub.goal-hit { display: inline-flex; align-items: center; gap: 6px; color: var(--pos); font-weight: 700; }
+.goal-fill.hit { position: relative; overflow: hidden; }
+.goal-fill.hit::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(105deg, transparent 25%, rgba(255,255,255,.45) 50%, transparent 75%);
+  transform: translateX(-100%);
+  animation: goalShine 2.6s ease-in-out infinite;
+}
+@keyframes goalShine { 55% { transform: translateX(100%); } 100% { transform: translateX(100%); } }
+
+/* Marcador de juros/multa na tabela (ícone, sem emoji) */
+.fee-flag { display: inline-flex; vertical-align: -2px; color: var(--warn); margin-right: 6px; }
+
+/* Botão instalar: alinhar ícone e texto */
+.app-install-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }

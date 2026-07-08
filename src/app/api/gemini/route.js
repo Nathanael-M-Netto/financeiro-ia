@@ -107,7 +107,7 @@ export async function POST(req) {
           const spent = isTotal ? spentTotal : (spentByCat[b.category] || 0)
           const lim = parseFloat(b.monthly_limit) || 0
           const pct = lim > 0 ? Math.round((spent / lim) * 100) : 0
-          return `- ${isTotal ? 'TETO GERAL' : b.category}: gastou R$${spent.toFixed(2)} de R$${lim.toFixed(2)} (${pct}%)${pct >= 100 ? ' ⚠️ ESTOUROU' : pct >= 70 ? ' (perto do limite)' : ''}`
+          return `- ${isTotal ? 'TETO GERAL' : b.category}: gastou R$${spent.toFixed(2)} de R$${lim.toFixed(2)} (${pct}%)${pct >= 100 ? ' [ESTOUROU]' : pct >= 70 ? ' (perto do limite)' : ''}`
         }).join('\n')}\n`
       : ''
 
@@ -201,7 +201,7 @@ REGRAS:
 DADOS DE CONTEXTO ESTÃO ANEXADOS AO COMANDO DO USUÁRIO.`;
 
     // Persiste a mensagem do usuário (histórico do chat), anotando o anexo.
-    const storedText = hasAttachment ? `${userText.trim()}\n\n📎 ${attachName}` : userText.trim()
+    const storedText = hasAttachment ? `${userText.trim()}\n\nAnexo: ${attachName}` : userText.trim()
     const { data: userMessage } = await supabase
       .from('chat_messages')
       .insert({ user_id: user.id, role: 'user', content: storedText })
@@ -433,7 +433,7 @@ DADOS DE CONTEXTO ESTÃO ANEXADOS AO COMANDO DO USUÁRIO.`;
     // Persiste a resposta do assistente (texto que vai pro chat).
     let finalMessage = aiMessage.trim() || 'Pronto! Ações executadas com sucesso.'
     if (dupSkipped > 0) {
-      finalMessage += `\n\n🛡️ Proteção anti-duplicata: pulei ${dupSkipped} lançamento(s) que já existiam (mesmo valor e data).`
+      finalMessage += `\n\n**Proteção anti-duplicata:** pulei ${dupSkipped} lançamento(s) que já existiam (mesmo valor e data).`
     }
     const { data: assistantMessage } = await supabase
       .from('chat_messages')

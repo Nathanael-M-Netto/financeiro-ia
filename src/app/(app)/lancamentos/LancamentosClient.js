@@ -7,7 +7,7 @@ import { formatCurrency, monthIdxForDate, invoiceSlotForPurchase } from '@/lib/f
 import { MONTHS_NAMES } from '@/lib/constants'
 import { cardChipStyle } from '@/lib/cards'
 import { categorize, CATEGORY_META, CATEGORY_KEYS } from '@/lib/categorize'
-import { IconPlus, IconPencil, IconTrash, IconClose } from '@/lib/icons'
+import { IconPlus, IconPencil, IconTrash, IconClose, IconRepeat, IconAlert } from '@/lib/icons'
 
 // Data de hoje (local) como 'YYYY-MM-DD' para o <input type="date">.
 function isoDate(d = new Date()) {
@@ -438,7 +438,7 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
                 {monthsPresent.map(m => <option key={m} value={m}>{monthName(m)}</option>)}
               </select>
               <button className={`btn-ghost ${filterFixed ? 'fix-on' : ''}`} onClick={() => setFilterFixed(v => !v)}
-                title="Mostrar só despesas e receitas fixas mensais">⟳ Só fixos</button>
+                title="Mostrar só despesas e receitas fixas mensais"><IconRepeat size={13} /> Só fixos</button>
               {filtersActive && (
                 <button className="btn-ghost" onClick={() => { setFilterText(''); setFilterCard(''); setFilterMonth(''); setFilterFixed(false) }}>Limpar</button>
               )}
@@ -473,7 +473,7 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
                       const sel = selected?.kind === 'despesa' && selected.id === e.id
                       return (
                         <tr key={e.id} className={`row-click ${sel ? 'row-selected' : ''}`} onClick={() => setSelected({ kind: 'despesa', id: e.id })}>
-                          <td>{e.is_fee ? '⚠ ' : ''}{e.description || 'Despesa'}</td>
+                          <td>{e.is_fee ? <span className="fee-flag"><IconAlert size={12} /></span> : null}{e.description || 'Despesa'}</td>
                           <td>{c ? <span className="tag" style={cardChipStyle(c.color)}>{c.name}</span> : (e.card || '—')}</td>
                           <td>{monthName(e.start_month)}{effectiveDay(e) ? <span className="row-sub"> · dia {effectiveDay(e)}</span> : null}</td>
                           <td style={{ textAlign: 'center' }}><span className="inst-badge">{e.is_fee ? '—' : (e.is_recurring ? 'Fixa' : `${e.total_installments}x`)}</span></td>
@@ -567,7 +567,7 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
                   <button className={selectedItem.is_recurring ? 'btn-ghost fix-on' : 'btn-ghost'} disabled={busy}
                     onClick={() => toggleRecurring(selected.kind, selectedItem)}
                     title={selectedItem.is_recurring ? 'Deixa de repetir todo mês' : 'Passa a valer todo mês, sem prazo'}>
-                    ⟳ {selectedItem.is_recurring ? 'Desfazer fixo' : 'Tornar fixo'}
+                    <IconRepeat size={14} /> {selectedItem.is_recurring ? 'Desfazer fixo' : 'Tornar fixo'}
                   </button>
                 )}
                 <button className="btn-ghost" onClick={() => selected.kind === 'despesa' ? openEditExpense(selectedItem) : openEditIncome(selectedItem)}><IconPencil size={14} /> Editar</button>

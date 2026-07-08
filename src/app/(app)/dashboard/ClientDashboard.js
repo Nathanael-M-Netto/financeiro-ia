@@ -6,7 +6,7 @@ import { computeAll, formatCurrency, monthIdxForDate } from '@/lib/finance-engin
 import { createClient } from '@/lib/supabase-browser'
 import { CARD_META, HORIZON, monthBaseName, monthYear } from '@/lib/constants'
 import { CATEGORY_META } from '@/lib/categorize'
-import { IconChevronLeft, IconChevronRight, IconAlert, IconCheck, IconSparkles } from '@/lib/icons'
+import { IconChevronLeft, IconChevronRight, IconAlert, IconCheck, IconSparkles, IconCheckCircle } from '@/lib/icons'
 import Link from 'next/link'
 
 // Quantos meses mostrar a partir do mês atual (janela rolante).
@@ -303,7 +303,7 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
           <div className="onb-head">
             <div className="onb-badge"><IconSparkles size={20} /></div>
             <div>
-              <h2 className="onb-title">Bem-vindo ao FinDash 👋</h2>
+              <h2 className="onb-title">Bem-vindo ao FinDash</h2>
               <p className="onb-sub">Monte seu controle em 3 passos rápidos. Leva 2 minutos.</p>
             </div>
           </div>
@@ -550,11 +550,16 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
                       <div className="goal-bar">
                         <div className={`goal-fill ${hit ? 'hit' : ''}`} style={{ width: `${pct}%` }} />
                       </div>
-                      <div className="goal-sub">
-                        {hit
-                          ? `Meta batida na projeção — sobra ${formatCurrency(projected - target)} 🎉`
-                          : `Faltam ${formatCurrency(target - projected)} na projeção de ${metrics[g.target_month]?.monthName || '—'} (${Math.round(pct)}%)`}
-                      </div>
+                      {hit ? (
+                        <div className="goal-sub goal-hit">
+                          <IconCheckCircle size={14} filled />
+                          <span>Meta batida na projeção — sobra {formatCurrency(projected - target)}</span>
+                        </div>
+                      ) : (
+                        <div className="goal-sub">
+                          Faltam {formatCurrency(target - projected)} na projeção de {metrics[g.target_month]?.monthName || '—'} ({Math.round(pct)}%)
+                        </div>
+                      )}
                     </div>
                   )
                 })}

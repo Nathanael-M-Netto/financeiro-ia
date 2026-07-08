@@ -51,5 +51,7 @@ export const IconLogout = (p) => (
 )
 export const IconSend = (p) => (<Svg {...p}><path d="M5 12 20 4l-5 16-3.5-6.5L5 12Z" /></Svg>)
 export const IconPaperclip = (p) => (<Svg {...p}><path d="M21 11.5 12.5 20a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8" /></Svg>)
+export const IconRepeat = (p) => (<Svg {...p}><path d="M17 2l4 4-4 4" /><path d="M3 11v-1a4 4 0 0 1 4-4h14" /><path d="M7 22l-4-4 4-4" /><path d="M21 13v1a4 4 0 0 1-4 4H3" /></Svg>)
+export const IconDownload = (p) => (<Svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></Svg>)
 export const IconClock = (p) => (<Svg {...p}><circle cx="12" cy="12" r="9" /><path d="M12 7.5V12l3 1.8" /></Svg>)
 export const IconCheckCircle = ({ filled, ...p }) => (<Svg {...p}><circle cx="12" cy="12" r="9" fill={filled ? 'currentColor' : 'none'} /><path d="M8.5 12.2l2.3 2.3 4.7-4.8" stroke={filled ? '#0a0a0c' : 'currentColor'} /></Svg>)
