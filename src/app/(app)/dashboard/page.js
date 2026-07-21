@@ -11,38 +11,23 @@ export default async function DashboardPage() {
     redirect('/login')
   }
 
-  const { data: expenses } = await supabase
-    .from('expenses')
-    .select('*')
-    .eq('user_id', user.id)
+  // As consultas são independentes; em paralelo a Visão geral abre sem somar
+  // cinco esperas de rede consecutivas.
+  const [expensesResult, incomeResult, goalsResult, transactionsResult, budgetsResult, cardsResult] = await Promise.all([
+    supabase.from('expenses').select('*').eq('user_id', user.id),
+    supabase.from('extra_income').select('*').eq('user_id', user.id),
+    supabase.from('goals').select('*').eq('user_id', user.id).order('target_month', { ascending: true }),
+    supabase.from('goal_transactions').select('*').eq('user_id', user.id),
+    supabase.from('budgets').select('*').eq('user_id', user.id),
+    supabase.from('cards').select('*').eq('user_id', user.id),
+  ])
 
-  const { data: extraIncome } = await supabase
-    .from('extra_income')
-    .select('*')
-    .eq('user_id', user.id)
-
-  const { data: goals } = await supabase
-    .from('goals')
-    .select('*')
-    .eq('user_id', user.id)
-    .order('target_month', { ascending: true })
-
-  const { data: goalTransactions } = await supabase
-    .from('goal_transactions')
-    .select('*')
-    .eq('user_id', user.id)
-
-  // Orçamentos por categoria (tabela criada na migration 0007; se ainda não existir, segue vazio).
-  const { data: budgets } = await supabase
-    .from('budgets')
-    .select('*')
-    .eq('user_id', user.id)
-
-  // Cartões: fonte única do dia de vencimento (as despesas derivam dele).
-  const { data: cards } = await supabase
-    .from('cards')
-    .select('*')
-    .eq('user_id', user.id)
+  const expenses = expensesResult.data
+  const extraIncome = incomeResult.data
+  const goals = goalsResult.data
+  const goalTransactions = transactionsResult.data
+  const budgets = budgetsResult.data
+  const cards = cardsResult.data
 
   return (
     <ClientDashboard

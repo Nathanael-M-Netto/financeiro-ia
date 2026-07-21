@@ -5,7 +5,7 @@ import { computeAll, formatCurrency, monthIdxForDate } from '@/lib/finance-engin
 import { createClient } from '@/lib/supabase-browser'
 import { CARD_META, HORIZON, monthBaseName, monthYear } from '@/lib/constants'
 import { CATEGORY_META } from '@/lib/categorize'
-import { IconChevronLeft, IconChevronRight, IconAlert, IconCheck, IconSparkles } from '@/lib/icons'
+import { IconChevronLeft, IconChevronRight, IconAlert, IconCheck, IconSparkles, IconClose, IconWallet } from '@/lib/icons'
 import { analyzeGoal } from '@/lib/goals'
 import Link from 'next/link'
 
@@ -46,6 +46,7 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
   const [realMonth, setRealMonth] = useState(0) // mês de hoje; abas só mostram daqui pra frente
   const [selectedCat, setSelectedCat] = useState(null) // categoria aberta no drilldown
   const [showDetails, setShowDetails] = useState(false) // no mobile, esconde gráficos/detalhes atrás de "Ver detalhes"
+  const [invoiceExpansion, setInvoiceExpansion] = useState({})
 
   useEffect(() => {
     const t = new Date()
@@ -64,6 +65,13 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
   )
   const currentMetric = metrics[currentMonth]
   const todayDay = today ? today.getDate() : null
+  const carryoverIncome = currentMetric.incomeList.find(item => item.isCarryover) || null
+  const monthIncomeItems = currentMetric.incomeList.filter(item => !item.isCarryover)
+
+  const selectMonth = (idx) => {
+    setCurrentMonth(idx)
+    setSelectedCat(null)
+  }
 
   // Janela rolante: do mês atual em diante, no máximo WINDOW meses.
   const windowMetrics = useMemo(
@@ -108,10 +116,10 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
         const val = Number(raw)
         if (raw !== '' && (!isFinite(val) || val < 0)) throw new Error(`Valor inválido em ${cat === '_total' ? 'Teto geral' : CATEGORY_META[cat].name}.`)
         if (raw === '' || val === 0) {
-          if (existing) await supabase.from('budgets').delete().eq('id', existing.id)
+          if (existing) await supabase.from('budgets').delete().eq('id', existing.id).eq('user_id', uid)
         } else if (existing) {
           if (parseFloat(existing.monthly_limit) !== val) {
-            await supabase.from('budgets').update({ monthly_limit: val }).eq('id', existing.id)
+            await supabase.from('budgets').update({ monthly_limit: val }).eq('id', existing.id).eq('user_id', uid)
           }
         } else {
           await supabase.from('budgets').insert({ user_id: uid, category: cat, monthly_limit: val })
@@ -142,15 +150,25 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
   // ── Termômetro financeiro (0–100, transparente) ────────────
   const health = useMemo(() => {
     if (!hasData) return null
-    const cur = metrics[realMonth] || currentMetric
+    const cur = currentMetric
     const notes = []
     let score = 100
-    if (cur.totalIn > 0) {
-      const ratio = cur.totalOut / cur.totalIn
+    if (cur.newIncome > 0) {
+      const ratio = cur.totalOut / cur.newIncome
       if (ratio > 0.9) { score -= 40; notes.push(`Saídas consomem ${Math.round(ratio * 100)}% das entradas (-40)`) }
       else if (ratio > 0.75) { score -= 25; notes.push(`Saídas consomem ${Math.round(ratio * 100)}% das entradas (-25)`) }
       else if (ratio > 0.5) { score -= 10; notes.push(`Saídas consomem ${Math.round(ratio * 100)}% das entradas (-10)`) }
       else { notes.push(`Saídas consomem só ${Math.round(ratio * 100)}% das entradas`) }
+    } else if (cur.totalOut > 0) {
+      score -= 25
+      notes.push('Há saídas no mês sem novas entradas previstas (-25)')
+    }
+    const totalBudget = budgets.find(b => b.category === '_total')
+    const totalLimit = Number(totalBudget?.monthly_limit) || 0
+    if (totalLimit > 0) {
+      const budgetRatio = cur.totalOut / totalLimit
+      if (budgetRatio > 1) { score -= 25; notes.push(`Teto mensal excedido em ${formatCurrency(cur.totalOut - totalLimit)} (-25)`) }
+      else if (budgetRatio >= 0.85) { score -= 10; notes.push(`Teto mensal já está ${Math.round(budgetRatio * 100)}% comprometido (-10)`) }
     }
     const negs = windowMetrics.filter(m => m.balance < 0).length
     if (negs > 0) { const pen = Math.min(45, negs * 15); score -= pen; notes.push(`${negs} mês(es) no negativo à frente (-${pen})`) }
@@ -159,7 +177,7 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
     const tone = score >= 80 ? 'pos' : score >= 55 ? 'warn' : 'neg'
     const label = score >= 80 ? 'Saudável' : score >= 55 ? 'Atenção' : 'Crítico'
     return { score, tone, label, notes }
-  }, [hasData, metrics, realMonth, currentMetric, windowMetrics])
+  }, [hasData, currentMetric, windowMetrics, budgets])
 
   // Marca/desmarca uma despesa como paga no mês visualizado (paid_through).
   const updatePaid = async (items, markPaid) => {
@@ -280,12 +298,12 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
     <div className={`page anim ${showDetails ? '' : 'mobile-collapsed'}`}>
       <header className="app-topbar">
         <div>
-          <h1 className="page-title">{monthBaseName(currentMonth)} <span className="page-title-year">{monthYear(currentMonth)}</span></h1>
+          <h1 className="page-title">{monthBaseName(currentMonth)}{' '}<span className="page-title-year">{monthYear(currentMonth)}</span></h1>
           <p className="page-sub">Sua projeção financeira do mês</p>
         </div>
         <div className="month-stepper">
-          <button className="icon-btn-sq" disabled={currentMonth <= realMonth} onClick={() => setCurrentMonth(m => Math.max(realMonth, m - 1))} aria-label="Mês anterior"><IconChevronLeft size={18} /></button>
-          <button className="icon-btn-sq" disabled={currentMonth >= windowEndIdx} onClick={() => setCurrentMonth(m => Math.min(windowEndIdx, m + 1))} aria-label="Próximo mês"><IconChevronRight size={18} /></button>
+          <button className="icon-btn-sq" disabled={currentMonth <= realMonth} onClick={() => selectMonth(Math.max(realMonth, currentMonth - 1))} aria-label="Mês anterior"><IconChevronLeft size={18} /></button>
+          <button className="icon-btn-sq" disabled={currentMonth >= windowEndIdx} onClick={() => selectMonth(Math.min(windowEndIdx, currentMonth + 1))} aria-label="Próximo mês"><IconChevronRight size={18} /></button>
         </div>
       </header>
 
@@ -329,7 +347,7 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
       {hasData && (
       <div className="month-tabs">
         {windowMetrics.map((m) => (
-          <button key={m.idx} className={`month-tab ${currentMonth === m.idx ? 'active' : ''} ${m.isCurrent ? 'is-current' : ''}`} onClick={() => setCurrentMonth(m.idx)}>
+          <button key={m.idx} className={`month-tab ${currentMonth === m.idx ? 'active' : ''} ${m.isCurrent ? 'is-current' : ''}`} onClick={() => selectMonth(m.idx)}>
             <span className="month-tab-name">{m.monthName}{m.isCurrent && <span className="month-tab-today">hoje</span>}</span>
             <span className="month-tab-bal" style={{ color: m.balance >= 0 ? 'var(--pos)' : 'var(--neg)' }}>{formatCurrency(m.balance)}</span>
           </button>
@@ -337,42 +355,61 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
       </div>
       )}
 
-      {/* Grana atual em destaque, no topo (compacto). Só conta o que JÁ caiu. */}
-      {hasData && currentMetric.isCurrent && (
-        <div className="grana-top">
-          <div className="grana-top-main">
-            <span className="grana-top-label">Grana atual — agora</span>
-            <span className="grana-top-val">{formatCurrency(currentMetric.saldoAtual)}</span>
+      {/* Resumo operacional: o que existe agora, o fluxo do mês e o que ainda vence. */}
+      {hasData && (
+        <section className="dashboard-overview" aria-label={`Resumo financeiro de ${currentMetric.monthName}`}>
+          <div className="dashboard-kpi primary">
+            <span className="dashboard-kpi-icon"><IconWallet size={18} /></span>
+            <div>
+              <span>{currentMetric.isCurrent ? 'Grana atual — agora' : 'Saldo projetado'}</span>
+              <strong>{formatCurrency(currentMetric.isCurrent ? currentMetric.saldoAtual : currentMetric.balance)}</strong>
+              {currentMetric.isCurrent && currentMetric.pendingIn > 0 && <small>Ainda entra {formatCurrency(currentMetric.pendingIn)}</small>}
+            </div>
           </div>
-          <span className="grana-top-extras">
-            {reservedInGoals > 0 && <span className="grana-top-sub goals">reservado em metas {formatCurrency(reservedInGoals)}</span>}
-            {currentMetric.pendingIn > 0 && <span className="grana-top-sub in">ainda entram {formatCurrency(currentMetric.pendingIn)}</span>}
-            {currentMetric.pendingPay > 0
-              ? <span className="grana-top-sub">falta pagar {formatCurrency(currentMetric.pendingPay)}</span>
-              : <span className="grana-top-sub ok">tudo deste mês está pago</span>}
-          </span>
-        </div>
+          <div className="dashboard-kpi positive">
+            <span>Entradas do mês</span>
+            <strong>{formatCurrency(currentMetric.newIncome)}</strong>
+            <small>Sem contar saldo anterior</small>
+          </div>
+          <div className="dashboard-kpi negative">
+            <span>Saídas do mês</span>
+            <strong>{formatCurrency(currentMetric.totalOut)}</strong>
+            <small>{currentMetric.expensesList.length} lançamento(s)</small>
+          </div>
+          <div className="dashboard-kpi warning">
+            <span>Falta pagar</span>
+            <strong>{formatCurrency(currentMetric.pendingPay)}</strong>
+            <small>{currentMetric.pendingPay > 0 ? 'Compromissos ainda abertos' : 'Tudo pago neste mês'}</small>
+          </div>
+          <div className={`dashboard-kpi ${currentMetric.balance >= 0 ? 'positive' : 'negative'}`}>
+            <span>Saldo fim do mês</span>
+            <strong>{formatCurrency(currentMetric.balance)}</strong>
+            <small>Transporta para o próximo mês</small>
+          </div>
+        </section>
       )}
 
       {/* Resumo essencial (só mobile) */}
       {hasData && (
       <div className="mobile-summary">
-        {currentMetric.isCurrent && (
-          <div className="ms-item"><span>Grana atual</span><strong className="ms-pos">{formatCurrency(currentMetric.saldoAtual)}</strong></div>
-        )}
-        {currentMetric.isCurrent && currentMetric.pendingIn > 0 && (
-          <div className="ms-item"><span>Ainda entra</span><strong className="ms-pos" style={{ opacity: .8 }}>{formatCurrency(currentMetric.pendingIn)}</strong></div>
-        )}
-        {reservedInGoals > 0 && (
-          <div className="ms-item"><span>Reservado em metas</span><strong className="ms-info">{formatCurrency(reservedInGoals)}</strong></div>
-        )}
+        <div className="ms-item ms-primary">
+          <span>{currentMetric.isCurrent ? 'Grana atual' : 'Saldo projetado'}</span>
+          <strong className="ms-pos">{formatCurrency(currentMetric.isCurrent ? currentMetric.saldoAtual : currentMetric.balance)}</strong>
+          {currentMetric.isCurrent && currentMetric.pendingIn > 0 && <small>Ainda entra {formatCurrency(currentMetric.pendingIn)}</small>}
+        </div>
+        <div className="ms-item"><span>Entradas do mês</span><strong className="ms-pos">{formatCurrency(currentMetric.newIncome)}</strong></div>
+        <div className="ms-item"><span>Saídas do mês</span><strong className="ms-neg">{formatCurrency(currentMetric.totalOut)}</strong></div>
         <div className="ms-item"><span>Falta pagar</span><strong className="ms-warn">{formatCurrency(currentMetric.pendingPay)}</strong></div>
         <div className="ms-item"><span>Saldo fim do mês</span><strong style={{ color: currentMetric.balance >= 0 ? 'var(--pos)' : 'var(--neg)' }}>{formatCurrency(currentMetric.balance)}</strong></div>
+        {reservedInGoals > 0 && (
+          <div className="ms-item ms-reserved"><span>Reservado em metas</span><strong className="ms-info">{formatCurrency(reservedInGoals)}</strong></div>
+        )}
       </div>
       )}
       {hasData && (<>
-      <button className="dash-details-toggle" onClick={() => setShowDetails(v => !v)}>
-        {showDetails ? 'Ocultar detalhes ▲' : 'Ver detalhes (gráficos, linha do tempo) ▼'}
+      <button className="dash-details-toggle" onClick={() => setShowDetails(v => !v)} aria-expanded={showDetails}>
+        <span>{showDetails ? 'Ocultar detalhes' : 'Ver gráficos e detalhes'}</span>
+        <IconChevronRight size={17} className={showDetails ? 'open' : ''} />
       </button>
 
       {/* Resumo anual */}
@@ -388,28 +425,6 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
         </div>
       </div>
 
-      <section className="kpi-grid dash-detail">
-        <div className="kpi-card" style={{ '--kpi-accent': 'var(--pos)' }}>
-          <div className="kpi-label">Total de entradas</div>
-          <div className="kpi-value" style={{ color: 'var(--pos)' }}>{formatCurrency(currentMetric.totalIn)}</div>
-        </div>
-        <div className="kpi-card" style={{ '--kpi-accent': 'var(--neg)' }}>
-          <div className="kpi-label">Total de saídas</div>
-          <div className="kpi-value" style={{ color: 'var(--neg)' }}>{formatCurrency(currentMetric.totalOut)}</div>
-        </div>
-        <div className="kpi-card" style={{ '--kpi-accent': currentMetric.balance >= 0 ? 'var(--pos)' : 'var(--neg)' }}>
-          <div className="kpi-label">Saldo líquido</div>
-          <div className="kpi-value" style={{ color: currentMetric.balance >= 0 ? 'var(--pos)' : 'var(--neg)' }}>
-            {currentMetric.balance > 0 ? '+' : ''}{formatCurrency(currentMetric.balance)}
-          </div>
-          <div className="kpi-sub">Transporta para o próximo mês</div>
-        </div>
-        <div className="kpi-card" style={{ '--kpi-accent': 'var(--info)' }}>
-          <div className="kpi-label">Itens ativos</div>
-          <div className="kpi-value" style={{ color: 'var(--info)' }}>{currentMetric.activeCardsCount}</div>
-          <div className="kpi-sub">cartões ou itens no mês</div>
-        </div>
-      </section>
       </>)}
 
       {hasData && (health || insights.length > 0) && (
@@ -427,7 +442,7 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
                 </div>
                 <div className="health-bar"><div className={`health-fill health-${health.tone}`} style={{ width: `${health.score}%` }} /></div>
                 <div className="health-notes">
-                  {health.notes.map((n, i) => <div key={i} className="health-note">• {n}</div>)}
+                  {health.notes.map((n, i) => <div key={i} className="health-note"><span className="health-note-dot" />{n}</div>)}
                 </div>
               </div>
             </div>
@@ -563,7 +578,7 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
                   const h = Math.round((Math.abs(v) / trendMaxAbs) * 100)
                   const pos = v >= 0
                   return (
-                    <button key={m.idx} className={`trend-col ${currentMonth === m.idx ? 'active' : ''}`} onClick={() => setCurrentMonth(m.idx)} title={`${m.monthName}: ${formatCurrency(v)}`}>
+                    <button key={m.idx} className={`trend-col ${currentMonth === m.idx ? 'active' : ''}`} onClick={() => selectMonth(m.idx)} title={`${m.monthName}: ${formatCurrency(v)}`}>
                       <div className="trend-top">{pos && v > 0 && <div className="trend-bar pos" style={{ height: `${h}%` }} />}</div>
                       <div className="trend-mid" />
                       <div className="trend-bot">{!pos && <div className="trend-bar neg" style={{ height: `${h}%` }} />}</div>
@@ -676,8 +691,8 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
       </section>
       )}
 
-      {currentMetric.isCurrent && (currentMetric.pendingPay > 0 || currentMetric.overdueAmount > 0) && (
-        <div className="pay-summary">
+      {currentMetric.isCurrent && currentMetric.overdueAmount > 0 && (
+        <div className="pay-summary dash-detail">
           <div className="pay-item">
             <span>Falta pagar este mês</span>
             <strong style={{ color: 'var(--warn)' }}>{formatCurrency(currentMetric.pendingPay)}</strong>
@@ -699,7 +714,9 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
         </div>
       )}
 
-      {currentMetric.alerts && currentMetric.alerts.map((alert, i) => (
+      {currentMetric.alerts && currentMetric.alerts
+        .filter(alert => !(alert.type === 'pos' && health?.tone !== 'pos'))
+        .map((alert, i) => (
         <div key={i} className={`alert alert-${alert.type}`}>
           <span className="alert-ico">{alertIcon(alert.type)}</span>
           <span>{alert.text}</span>
@@ -712,7 +729,10 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
             <div className="card">
               <div className="card-header">
                 <span className="timeline-title" style={{ marginBottom: 0 }}>Despesas detalhadas — {currentMetric.monthName}</span>
-                <span className="hero-negative" style={{ fontSize: '.9rem', fontWeight: 800 }}>{formatCurrency(currentMetric.totalOut)}</span>
+                <div className="dashboard-section-actions">
+                  <span className="hero-negative" style={{ fontSize: '.9rem', fontWeight: 800 }}>{formatCurrency(currentMetric.totalOut)}</span>
+                  <Link className="btn-ghost dashboard-view-all" href="/lancamentos">Ver lançamentos</Link>
+                </div>
               </div>
               <div className="card-body">
                 {Array.from(new Set(currentMetric.expensesList.map(e => e.cardName))).map(cardName => {
@@ -721,14 +741,22 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
                   const meta = CARD_META[cardItems[0].cardId] || CARD_META.extra
                   const invoicePaid = cardItems.every(item => item.isPaid)
                   const invoiceBusy = cardItems.some(item => paidBusyIds.has(item.id))
+                  const invoiceExpanded = invoiceExpansion[cardName] ?? !invoicePaid
 
                   return (
                     <div className="card-group" key={cardName}>
                       <div className="card-group-hd">
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <button
+                          className="card-group-toggle"
+                          onClick={() => setInvoiceExpansion(current => ({ ...current, [cardName]: !invoiceExpanded }))}
+                          aria-expanded={invoiceExpanded}
+                          aria-label={`${invoiceExpanded ? 'Recolher' : 'Ver'} itens de ${meta.name}`}
+                        >
+                          <IconChevronRight size={15} className={invoiceExpanded ? 'open' : ''} />
                           <span className={`tag ${meta.tagClass}`}>{meta.name}</span>
-                          <span style={{ fontSize: '.68rem', color: 'var(--text2)' }}>Vencimento dia {cardItems[0].payDay}</span>
-                        </div>
+                          <span className="card-group-due">Vencimento dia {cardItems[0].payDay}</span>
+                          <span className="card-group-count">{cardItems.length} item(ns)</span>
+                        </button>
                         <div className="invoice-group-summary">
                           <span className="hero-negative">{formatCurrency(cardTotal)}</span>
                           <button className={`invoice-pay-btn ${invoicePaid ? 'paid' : ''}`} onClick={() => toggleInvoicePaid(cardItems)} disabled={invoiceBusy}>
@@ -737,7 +765,7 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
                           </button>
                         </div>
                       </div>
-                      <table className="exp-table">
+                      {invoiceExpanded && <table className="exp-table">
                         <thead>
                           <tr>
                             <th>Descrição</th>
@@ -760,7 +788,7 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
                             </tr>
                           ))}
                         </tbody>
-                      </table>
+                      </table>}
                     </div>
                   )
                 })}
@@ -782,12 +810,18 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
               <table>
                 <tbody>
                   <tr className="totals-row-in">
-                    <td>Entradas do mês</td>
-                    <td className="hero-positive">{formatCurrency(currentMetric.totalIn)}</td>
+                    <td>Receitas do mês</td>
+                    <td className="hero-positive">{formatCurrency(currentMetric.newIncome)}</td>
                   </tr>
-                  {currentMetric.incomeList.map((inc, i) => (
+                  {carryoverIncome && (
+                    <tr className="totals-row-carry">
+                      <td>Saldo trazido do mês anterior</td>
+                      <td className={carryoverIncome.amount >= 0 ? 'hero-positive' : 'hero-negative'}>{formatCurrency(carryoverIncome.amount)}</td>
+                    </tr>
+                  )}
+                  {monthIncomeItems.map((inc, i) => (
                     <tr key={`inc-${i}`}>
-                      <td style={{ paddingLeft: '24px', fontSize: '.75rem' }}>• {inc.label}</td>
+                      <td style={{ paddingLeft: '24px', fontSize: '.75rem' }}>{inc.label}</td>
                       <td className="hero-positive">{formatCurrency(inc.amount)}</td>
                     </tr>
                   ))}
@@ -803,27 +837,27 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
       )}
 
       {/* Modal: orçamentos por categoria */}
-      <div className={`modal-backdrop ${budgetModal ? 'open' : ''}`}>
-        <div className="modal-box" style={{ maxWidth: '440px' }}>
+      <div className={`modal-backdrop ${budgetModal ? 'open' : ''}`} role="presentation" onMouseDown={() => setBudgetModal(false)}>
+        <div className="modal-box" style={{ maxWidth: '440px' }} role="dialog" aria-modal="true" aria-labelledby="budget-modal-title" onMouseDown={event => event.stopPropagation()}>
           <div className="modal-hd">
-            <div style={{ fontWeight: 800, fontSize: '.9rem', color: '#fff' }}>Tetos de gasto por categoria</div>
-            <button className="modal-close" onClick={() => setBudgetModal(false)}>✕</button>
+            <div id="budget-modal-title" style={{ fontWeight: 800, fontSize: '.9rem', color: '#fff' }}>Tetos de gasto por categoria</div>
+            <button className="modal-close" onClick={() => setBudgetModal(false)} aria-label="Fechar"><IconClose size={16} /></button>
           </div>
           <div className="modal-bd">
             <p style={{ fontSize: '.78rem', color: 'var(--text2)', lineHeight: 1.5, marginBottom: '12px' }}>
               Quanto você quer gastar <strong style={{ color: 'var(--text)' }}>no máximo por mês</strong> em cada categoria. Deixe em branco para não acompanhar.
             </p>
             <div className="budget-edit-row budget-edit-total">
-              <span className="budget-name">Teto geral do mês</span>
-              <input className="form-input budget-edit-input" type="number" min="0" step="10" placeholder="—"
+              <label className="budget-name" htmlFor="budget-total">Teto geral do mês</label>
+              <input id="budget-total" name="budget-total" className="form-input budget-edit-input" type="number" min="0" step="10" placeholder="—"
                 value={budgetDraft['_total'] ?? ''}
                 onChange={e => setBudgetDraft(d => ({ ...d, _total: e.target.value }))} />
             </div>
             <div className="budget-edit-grid">
               {Object.keys(CATEGORY_META).map(cat => (
                 <div key={cat} className="budget-edit-row">
-                  <span className="budget-name"><span className="budget-dot" style={{ background: CATEGORY_META[cat].color }} />{CATEGORY_META[cat].name}</span>
-                  <input className="form-input budget-edit-input" type="number" min="0" step="10" placeholder="—"
+                  <label className="budget-name" htmlFor={`budget-${cat}`}><span className="budget-dot" style={{ background: CATEGORY_META[cat].color }} />{CATEGORY_META[cat].name}</label>
+                  <input id={`budget-${cat}`} name={`budget-${cat}`} className="form-input budget-edit-input" type="number" min="0" step="10" placeholder="—"
                     value={budgetDraft[cat] ?? ''}
                     onChange={e => setBudgetDraft(d => ({ ...d, [cat]: e.target.value }))} />
                 </div>
