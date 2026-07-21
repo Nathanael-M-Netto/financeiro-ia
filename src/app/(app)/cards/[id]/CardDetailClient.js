@@ -6,12 +6,18 @@ import { formatCurrency } from '@/lib/finance-engine'
 import { MONTHS_NAMES } from '@/lib/constants'
 import { analyzeCard } from '@/lib/card-analysis'
 import { cardChipStyle } from '@/lib/cards'
+import { createClient } from '@/lib/supabase-browser'
+import { IconCheck, IconChevronLeft } from '@/lib/icons'
 
 export default function CardDetailClient({ card, expenses, currentMonthIdx }) {
+  const supabase = createClient()
   // Mês selecionado no gráfico (clicável) — abre no mês atual.
   const [selMonth, setSelMonth] = useState(currentMonthIdx)
+  const [localExpenses, setLocalExpenses] = useState(expenses)
+  const [payBusy, setPayBusy] = useState(false)
+  const [payError, setPayError] = useState(null)
 
-  const a = analyzeCard(expenses, card, currentMonthIdx)
+  const a = analyzeCard(localExpenses, card, currentMonthIdx)
   const pct = a.utilizationPct
   const utilColor = pct == null ? 'var(--info)' : pct >= 80 ? 'var(--neg)' : pct >= 50 ? 'var(--warn)' : 'var(--pos)'
 
@@ -30,11 +36,32 @@ export default function CardDetailClient({ card, expenses, currentMonthIdx }) {
     })
     .filter(Boolean)
 
+  const invoicePaid = selExpenses.length > 0 && selExpenses.every(expense => expense.isPaid)
+
+  const setInvoicePaid = async () => {
+    if (payBusy || !selExpenses.length) return
+    const ids = selExpenses.map(expense => expense.id).filter(Boolean)
+    const nextPaidThrough = invoicePaid ? (selMonth > 0 ? selMonth - 1 : null) : selMonth
+    const before = new Map(localExpenses.filter(expense => ids.includes(expense.id)).map(expense => [expense.id, expense.paid_through]))
+    setPayBusy(true)
+    setPayError(null)
+    setLocalExpenses(prev => prev.map(expense => ids.includes(expense.id) ? { ...expense, paid_through: nextPaidThrough } : expense))
+    const { data: { session } } = await supabase.auth.getSession()
+    let query = supabase.from('expenses').update({ paid_through: nextPaidThrough }).in('id', ids)
+    if (session?.user?.id) query = query.eq('user_id', session.user.id)
+    const { error } = await query
+    if (error) {
+      setLocalExpenses(prev => prev.map(expense => before.has(expense.id) ? { ...expense, paid_through: before.get(expense.id) } : expense))
+      setPayError('Não consegui salvar o pagamento. O estado anterior foi restaurado.')
+    }
+    setPayBusy(false)
+  }
+
   return (
-    <div className="cards-page">
-      <header className="app-topbar">
+    <div className="page legacy-page card-detail-page anim">
+      <header className="app-topbar legacy-topbar">
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
-          <Link href="/cards" className="btn-ghost">← Cartões</Link>
+          <Link href="/cards" className="btn-ghost"><IconChevronLeft size={14} /> Cartões</Link>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <span className="card-tile-name" style={{ ...cardChipStyle(card.color), fontSize: '.85rem' }}>{card.name}</span>
             <div style={{ fontSize: '.72rem', color: 'var(--text2)' }}>
@@ -46,26 +73,26 @@ export default function CardDetailClient({ card, expenses, currentMonthIdx }) {
       </header>
 
       {/* KPIs */}
-      <section className="kpi-grid">
-        <div className="kpi-card" style={{ '--kpi-accent': 'var(--neg)' }}>
-          <div className="kpi-label">Fatura — {MONTHS_NAMES[selMonth] || '—'}</div>
-          <div className="kpi-value" style={{ color: 'var(--neg)' }}>{formatCurrency(selInvoice)}</div>
-          {selMonth !== currentMonthIdx && <div className="kpi-sub">toque nas barras p/ trocar o mês</div>}
+      <section className="legacy-overview">
+        <div className="legacy-kpi negative">
+          <span>Fatura — {MONTHS_NAMES[selMonth] || '—'}</span>
+          <strong>{formatCurrency(selInvoice)}</strong>
+          {selMonth !== currentMonthIdx && <small>Período selecionado no gráfico</small>}
         </div>
-        <div className="kpi-card" style={{ '--kpi-accent': utilColor }}>
-          <div className="kpi-label">Utilização do limite</div>
-          <div className="kpi-value" style={{ color: utilColor }}>{pct == null ? '—' : `${pct.toFixed(0)}%`}</div>
-          <div className="kpi-sub">{a.limit ? `Limite ${formatCurrency(a.limit)}` : 'Defina o limite do cartão'}</div>
+        <div className="legacy-kpi">
+          <span>Utilização do limite</span>
+          <strong style={{ color: utilColor }}>{pct == null ? '—' : `${pct.toFixed(0)}%`}</strong>
+          <small>{a.limit ? `Limite ${formatCurrency(a.limit)}` : 'Defina o limite do cartão'}</small>
         </div>
-        <div className="kpi-card" style={{ '--kpi-accent': 'var(--info)' }}>
-          <div className="kpi-label">Melhor dia de compra</div>
-          <div className="kpi-value" style={{ color: 'var(--info)' }}>{a.bestBuyDay ? `Dia ${a.bestBuyDay}` : '—'}</div>
-          <div className="kpi-sub">{a.bestBuyDay ? 'Logo após o fechamento' : 'Defina o dia de fechamento'}</div>
+        <div className="legacy-kpi">
+          <span>Melhor dia de compra</span>
+          <strong style={{ color: 'var(--info)' }}>{a.bestBuyDay ? `Dia ${a.bestBuyDay}` : '—'}</strong>
+          <small>{a.bestBuyDay ? 'Logo após o fechamento' : 'Defina o dia de fechamento'}</small>
         </div>
-        <div className="kpi-card" style={{ '--kpi-accent': 'var(--warn)' }}>
-          <div className="kpi-label">Total a pagar (restante)</div>
-          <div className="kpi-value" style={{ color: 'var(--warn)' }}>{formatCurrency(a.remaining)}</div>
-          <div className="kpi-sub">{a.openPlansCount} parcelamento(s) em aberto · pagos não contam</div>
+        <div className="legacy-kpi">
+          <span>Total a pagar</span>
+          <strong style={{ color: 'var(--warn)' }}>{formatCurrency(a.remaining)}</strong>
+          <small>{a.openPlansCount} parcelamento(s) em aberto</small>
         </div>
       </section>
 
@@ -119,9 +146,18 @@ export default function CardDetailClient({ card, expenses, currentMonthIdx }) {
       <section className="card">
         <div className="card-header">
           <span className="timeline-title" style={{ marginBottom: 0 }}>Fatura de {MONTHS_NAMES[selMonth]}</span>
-          <span className="hero-negative" style={{ fontSize: '.88rem', fontWeight: 800 }}>{formatCurrency(selInvoice)}</span>
+          <div className="invoice-detail-actions">
+            <span className="hero-negative">{formatCurrency(selInvoice)}</span>
+            {selExpenses.length > 0 && (
+              <button className={`invoice-pay-btn ${invoicePaid ? 'paid' : ''}`} onClick={setInvoicePaid} disabled={payBusy}>
+                <span className={`pay-toggle ${invoicePaid ? 'on' : ''}`}>{invoicePaid ? <IconCheck size={13} /> : ''}</span>
+                {payBusy ? 'Salvando…' : invoicePaid ? 'Fatura paga' : 'Marcar fatura paga'}
+              </button>
+            )}
+          </div>
         </div>
         <div className="card-body">
+          {payError && <div className="form-hint hint-warn invoice-pay-error">{payError}</div>}
           {selExpenses.length === 0 ? (
             <div style={{ textAlign: 'center', color: 'var(--text2)', fontSize: '.82rem', padding: '16px 0' }}>
               Nada na fatura de {MONTHS_NAMES[selMonth]}.
@@ -138,7 +174,7 @@ export default function CardDetailClient({ card, expenses, currentMonthIdx }) {
               <tbody>
                 {selExpenses.map((e) => (
                   <tr key={e.id} className={e.isPaid ? 'row-paid' : ''}>
-                    <td>{e.is_fee ? 'Juros/Multa' : (e.description || 'Despesa')}{e.isPaid ? ' ✓' : ''}</td>
+                    <td><span className="invoice-item-name">{e.is_fee ? 'Juros/Multa' : (e.description || 'Despesa')}{e.isPaid && <span className="invoice-paid-icon"><IconCheck size={13} aria-hidden="true" /><span className="sr-only">Pago</span></span>}</span></td>
                     <td style={{ textAlign: 'center' }}><span className="inst-badge">{e.instLabel}</span></td>
                     <td className="amt-col">{formatCurrency(parseFloat(e.amount) || 0)}</td>
                   </tr>

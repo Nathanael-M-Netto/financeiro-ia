@@ -16,6 +16,26 @@ export const CATEGORY_META = {
 
 export const CATEGORY_KEYS = Object.keys(CATEGORY_META)
 
+export function normalizeMerchantName(description) {
+  return String(description || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\b(pix|compra|debito|credito|pagamento|pgto|transacao|transf|ted|doc)\b/g, ' ')
+    .replace(/\b\d{2,}\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .slice(0, 100)
+}
+
+export function importFingerprint({ kind, date, amount, description, externalId, account }) {
+  const stableId = String(externalId || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 120)
+  const scope = normalizeMerchantName(account || 'conta') || 'conta'
+  if (stableId) return `v1|${kind}|${scope}|id:${stableId}`
+  const value = Number(amount)
+  return `v1|${kind}|${String(date || '')}|${Number.isFinite(value) ? value.toFixed(2) : '0.00'}|${normalizeMerchantName(description)}|${scope}`.slice(0, 300)
+}
+
 const RULES = [
   ['alimentacao', ['mercado', 'supermerc', 'padaria', 'pao', 'açougue', 'acougue', 'hortifruti', 'ifood', 'rappi', 'restaurante', 'lanche', 'pizza', 'burger', 'mcdonald', 'feira', 'atacad', 'acai', 'açai', 'cafe', 'café']],
   ['transporte',  ['uber', '99 ', 'cabify', 'posto', 'gasolina', 'combust', 'etanol', 'onibus', 'ônibus', 'metro', 'metrô', 'estacionamento', 'pedagio', 'pedágio', 'mecanic', 'oficina', 'pneu', 'moto', 'passagem']],
@@ -30,7 +50,7 @@ const RULES = [
 
 // Retorna a chave da categoria para uma descrição, ou null se nada casar.
 export function categorize(description) {
-  const t = (description || '').toLowerCase()
+  const t = normalizeMerchantName(description)
   if (!t) return null
   for (const [cat, words] of RULES) {
     for (const w of words) {

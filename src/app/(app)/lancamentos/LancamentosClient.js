@@ -6,8 +6,8 @@ import { createClient } from '@/lib/supabase-browser'
 import { formatCurrency, monthIdxForDate, invoiceSlotForPurchase } from '@/lib/finance-engine'
 import { MONTHS_NAMES } from '@/lib/constants'
 import { cardChipStyle } from '@/lib/cards'
-import { categorize, CATEGORY_META, CATEGORY_KEYS } from '@/lib/categorize'
-import { IconPlus, IconPencil, IconTrash, IconClose, IconRepeat, IconAlert } from '@/lib/icons'
+import { categorize, CATEGORY_META, CATEGORY_KEYS, normalizeMerchantName } from '@/lib/categorize'
+import { IconPlus, IconPencil, IconTrash, IconClose, IconRepeat, IconAlert, IconDownload, IconSparkles, IconWallet } from '@/lib/icons'
 
 // Data de hoje (local) como 'YYYY-MM-DD' para o <input type="date">.
 function isoDate(d = new Date()) {
@@ -59,7 +59,8 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
   // Filtros das listas
   const [filterText, setFilterText] = useState('')
   const [filterCard, setFilterCard] = useState('') // '' = todos · 'extra' = à vista · senão card_id
-  const [filterMonth, setFilterMonth] = useState('') // '' = todos · senão índice do mês
+  const currentMonthFilter = String(monthIdxForDate())
+  const [filterMonth, setFilterMonth] = useState(currentMonthFilter) // abre sempre no mês atual
   const [filterFixed, setFilterFixed] = useState(false) // true = só fixos mensais
 
   const showToast = (message, type = 'success') => {
@@ -91,21 +92,21 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
     router.refresh()
   }
 
-  // Preenche a categoria das despesas sem categoria, deduzindo pelo nome.
+  // Regra local -> memória pessoal -> pesquisa web em lote -> Outros.
   const categorizeAll = async () => {
-    const toUpdate = expenses
-      .filter(e => !e.category)
-      .map(e => ({ id: e.id, category: categorize(e.description) }))
-      .filter(x => x.category)
-    if (toUpdate.length === 0) { showToast('Nada novo para categorizar.', 'success'); return }
+    if (!expenses.some(e => !e.category)) { showToast('Nada novo para categorizar.', 'success'); return }
     setBusy(true)
     try {
-      for (const u of toUpdate) {
-        const { error } = await supabase.from('expenses').update({ category: u.category }).eq('id', u.id).eq('user_id', userId)
-        if (error) throw error
-      }
+      const response = await fetch('/api/categorize', { method: 'POST' })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Não foi possível categorizar.')
       await reload()
-      showToast(`${toUpdate.length} despesa(s) categorizada(s).`)
+      const details = [
+        result.researched ? `${result.researched} pesquisada(s)` : null,
+        result.saved ? `${result.saved} da sua memória` : null,
+        result.fallback ? `${result.fallback} em Outros` : null,
+      ].filter(Boolean).join(' · ')
+      showToast(`${result.updated} despesa(s) categorizada(s)${details ? ` — ${details}` : ''}.`)
     } catch (e) {
       showToast(`Erro: ${e.message}`, 'error')
     } finally {
@@ -229,6 +230,19 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
             : supabase.from('expenses').insert(rest)))
         }
         if (error) throw error
+        // Uma escolha manual vira memória pessoal para os próximos extratos.
+        if (payload.category) {
+          const merchantKey = normalizeMerchantName(payload.description)
+          if (merchantKey) await supabase.from('merchant_category_rules').upsert({
+            user_id: userId,
+            merchant_key: merchantKey,
+            display_name: payload.description.slice(0, 120),
+            category: payload.category,
+            source: 'manual',
+            confidence: 1,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'user_id,merchant_key' })
+        }
       } else {
         const payload = {
           user_id: userId,
@@ -353,20 +367,29 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
 
   // Listas filtradas (texto / cartão / mês). Cartão só afeta despesas.
   const matchText = (desc) => !filterText || (desc || '').toLowerCase().includes(filterText.toLowerCase())
-  const matchMonth = (sm) => filterMonth === '' || String(sm) === String(filterMonth)
+  const activeInMonth = (item, kind) => {
+    if (filterMonth === '') return true
+    const month = Number(filterMonth)
+    const start = Number(item.start_month) || 0
+    if (item.is_recurring) return month >= start
+    const length = kind === 'despesa' ? (Number(item.total_installments) || 1) : (Number(item.total_months) || 1)
+    return month >= start && month < start + length
+  }
   const fExpenses = expenses.filter(e => {
     if (!matchText(e.description)) return false
-    if (!matchMonth(e.start_month)) return false
+    if (!activeInMonth(e, 'despesa')) return false
     if (filterFixed && !e.is_recurring) return false
     if (filterCard === 'extra' && e.card_id) return false
     if (filterCard && filterCard !== 'extra' && e.card_id !== filterCard) return false
     return true
   })
-  const fIncomes = incomes.filter(i => matchText(i.description) && matchMonth(i.start_month) && (!filterFixed || i.is_recurring))
-  const filtersActive = filterText !== '' || filterCard !== '' || filterMonth !== '' || filterFixed
-  // Meses presentes nos lançamentos (para o seletor de filtro).
-  const monthsPresent = [...new Set([...expenses, ...incomes].map(x => x.start_month))]
-    .filter(m => m != null).sort((a, b) => a - b)
+  const fIncomes = incomes.filter(i => matchText(i.description) && activeInMonth(i, 'receita') && (!filterFixed || i.is_recurring))
+  const filtersActive = filterText !== '' || filterCard !== '' || filterMonth !== currentMonthFilter || filterFixed
+  const listIsFiltered = filterText !== '' || filterCard !== '' || filterMonth !== '' || filterFixed
+  const selectedPeriod = filterMonth === '' ? 'Todos os meses' : monthName(Number(filterMonth))
+  const visibleOut = fExpenses.reduce((sum, item) => sum + (Number(item.amount) || 0), 0)
+  const visibleIn = fIncomes.reduce((sum, item) => sum + (Number(item.amount) || 0), 0)
+  const uncategorized = fExpenses.filter(item => !item.category).length
 
   const selectedItem = selected
     ? (selected.kind === 'despesa'
@@ -403,23 +426,30 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
   })()
 
   return (
-    <div className="cards-page">
-      <header className="app-topbar">
+    <div className="page legacy-page lanc-page anim">
+      <header className="app-topbar legacy-topbar">
         <div>
           <h1 className="page-title">Lançamentos</h1>
-          <p className="page-sub">Adicione, edite ou exclua despesas e receitas manualmente.</p>
+          <p className="page-sub">Movimentações de {selectedPeriod.toLowerCase()}, com despesas, receitas e recorrências no mesmo lugar.</p>
         </div>
         <div className="lanc-add-actions">
           {(expenses.length > 0 || incomes.length > 0) && (
-            <button className="btn-ghost" onClick={exportCsv} title="Baixa um CSV com todos os lançamentos (abre no Excel)">Exportar CSV</button>
+            <button className="btn-ghost" onClick={exportCsv} title="Baixa um CSV com todos os lançamentos (abre no Excel)"><IconDownload size={14} /> Exportar</button>
           )}
           {expenses.some(e => !e.category) && (
-            <button className="btn-ghost" onClick={categorizeAll} disabled={busy} title="Preenche a categoria pelo nome">Auto-categorizar</button>
+            <button className="btn-ghost" onClick={categorizeAll} disabled={busy} title="Usa regras, sua memória e pesquisa para nomes desconhecidos"><IconSparkles size={14} /> Categorizar</button>
           )}
           <button className="btn-soft-neg" onClick={() => openAdd('despesa')}><IconPlus size={16} /> Nova despesa</button>
           <button className="btn-soft-pos" onClick={() => openAdd('receita')}><IconPlus size={16} /> Nova receita</button>
         </div>
       </header>
+
+      <section className="legacy-overview lanc-overview" aria-label={`Resumo de ${selectedPeriod}`}>
+        <div className="legacy-kpi primary"><span className="legacy-kpi-icon"><IconWallet size={18} /></span><div><span>Período selecionado</span><strong>{selectedPeriod}</strong></div></div>
+        <div className="legacy-kpi positive"><span>Entradas</span><strong>{formatCurrency(visibleIn)}</strong><small>{fIncomes.length} lançamento(s)</small></div>
+        <div className="legacy-kpi negative"><span>Saídas</span><strong>{formatCurrency(visibleOut)}</strong><small>{fExpenses.length} lançamento(s)</small></div>
+        <div className="legacy-kpi"><span>Resultado do período</span><strong className={visibleIn - visibleOut >= 0 ? 'pos' : 'neg'}>{formatCurrency(visibleIn - visibleOut)}</strong><small>{uncategorized ? `${uncategorized} sem categoria` : 'Categorias em dia'}</small></div>
+      </section>
 
       <div className="lanc-layout">
         <div className="lanc-main">
@@ -428,19 +458,19 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
             <div className="lanc-filters">
               <input className="form-input lanc-filter-search" placeholder="Buscar por descrição…"
                 value={filterText} onChange={e => setFilterText(e.target.value)} />
-              <select className="form-input" value={filterCard} onChange={e => setFilterCard(e.target.value)}>
+              <select className="form-input" aria-label="Filtrar por cartão ou forma de pagamento" value={filterCard} onChange={e => setFilterCard(e.target.value)}>
                 <option value="">Todos os cartões</option>
                 <option value="extra">À vista (Pix / dinheiro)</option>
                 {cards.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
-              <select className="form-input" value={filterMonth} onChange={e => setFilterMonth(e.target.value)}>
+              <select className="form-input" aria-label="Filtrar por mês" value={filterMonth} onChange={e => setFilterMonth(e.target.value)}>
                 <option value="">Todos os meses</option>
-                {monthsPresent.map(m => <option key={m} value={m}>{monthName(m)}</option>)}
+                {MONTHS_NAMES.map((m, index) => <option key={index} value={index}>{m}</option>)}
               </select>
               <button className={`btn-ghost ${filterFixed ? 'fix-on' : ''}`} onClick={() => setFilterFixed(v => !v)}
                 title="Mostrar só despesas e receitas fixas mensais"><IconRepeat size={13} /> Só fixos</button>
               {filtersActive && (
-                <button className="btn-ghost" onClick={() => { setFilterText(''); setFilterCard(''); setFilterMonth(''); setFilterFixed(false) }}>Limpar</button>
+                <button className="btn-ghost" onClick={() => { setFilterText(''); setFilterCard(''); setFilterMonth(currentMonthFilter); setFilterFixed(false) }}>Restaurar</button>
               )}
             </div>
           )}
@@ -449,7 +479,7 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
           <section className="card" style={{ marginBottom: '18px' }}>
             <div className="card-header">
               <span className="timeline-title" style={{ marginBottom: 0 }}>Despesas</span>
-              <span className="lanc-count">{filtersActive ? `${fExpenses.length}/${expenses.length}` : expenses.length}</span>
+              <span className="lanc-count">{listIsFiltered ? `${fExpenses.length}/${expenses.length}` : expenses.length}</span>
             </div>
             <div className="card-body" style={{ padding: 0 }}>
               {expenses.length === 0 ? (
@@ -491,7 +521,7 @@ export default function LancamentosClient({ initialExpenses, initialIncomes, car
           <section className="card">
             <div className="card-header">
               <span className="timeline-title" style={{ marginBottom: 0 }}>Receitas</span>
-              <span className="lanc-count">{filtersActive ? `${fIncomes.length}/${incomes.length}` : incomes.length}</span>
+              <span className="lanc-count">{listIsFiltered ? `${fIncomes.length}/${incomes.length}` : incomes.length}</span>
             </div>
             <div className="card-body" style={{ padding: 0 }}>
               {incomes.length === 0 ? (

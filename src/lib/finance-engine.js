@@ -125,6 +125,7 @@ export function computeAll(expenses = [], extraIncome = [], today = null, cards 
         label: carryover > 0 ? 'Sobra mês anterior' : 'Dívida anterior',
         amount: carryover,
         day: 1,
+        isCarryover: true,
         isNegativeCarry: carryover < 0
       })
     }
@@ -132,6 +133,7 @@ export function computeAll(expenses = [], extraIncome = [], today = null, cards 
     incomeThisMonth.push(...monthIncome)
 
     const totalIncome = incomeThisMonth.reduce((sum, i) => sum + i.amount, 0)
+    const newIncome = monthIncome.reduce((sum, item) => sum + item.amount, 0)
 
     // Despesas ativas no mês
     const activeExpenses = expenses.map(exp => {
@@ -208,6 +210,7 @@ export function computeAll(expenses = [], extraIncome = [], today = null, cards 
       monthName,
       isCurrent: m === currentMonthIdx,
       totalIn: totalIncome,
+      newIncome,
       totalOut,
       balance,
       activeCardsCount: new Set(activeExpenses.map(e => e.cardName)).size,

@@ -1,7 +1,7 @@
 // Service worker mínimo do FinDash.
 // Estratégia: rede primeiro (dados financeiros sempre frescos); se offline,
 // serve do cache o que já foi visitado. Nada de cache agressivo.
-const CACHE = 'findash-v1'
+const CACHE = 'findash-v2'
 
 self.addEventListener('install', () => self.skipWaiting())
 

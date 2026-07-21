@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase-browser'
 import {
   IconBrand, IconDashboard, IconReceipt, IconCard, IconSparkles,
   IconLogout, IconMenu, IconClose, IconClock, IconDownload,
+  IconTarget,
 } from '@/lib/icons'
 
 const NAV_SECTIONS = [
@@ -16,6 +17,7 @@ const NAV_SECTIONS = [
       { href: '/dashboard', label: 'Visão geral', Icon: IconDashboard },
       { href: '/lancamentos', label: 'Lançamentos', Icon: IconReceipt },
       { href: '/cards', label: 'Cartões', Icon: IconCard },
+      { href: '/metas', label: 'Metas e rendimentos', Icon: IconTarget },
       { href: '/historico', label: 'Histórico', Icon: IconClock },
     ],
   },

@@ -1,12 +1,12 @@
 'use client'
 
 import React, { useState, useMemo, useEffect, useRef } from 'react'
-import { useRouter } from 'next/navigation'
 import { computeAll, formatCurrency, monthIdxForDate } from '@/lib/finance-engine'
 import { createClient } from '@/lib/supabase-browser'
 import { CARD_META, HORIZON, monthBaseName, monthYear } from '@/lib/constants'
 import { CATEGORY_META } from '@/lib/categorize'
-import { IconChevronLeft, IconChevronRight, IconAlert, IconCheck, IconSparkles, IconCheckCircle } from '@/lib/icons'
+import { IconChevronLeft, IconChevronRight, IconAlert, IconCheck, IconSparkles } from '@/lib/icons'
+import { analyzeGoal } from '@/lib/goals'
 import Link from 'next/link'
 
 // Quantos meses mostrar a partir do mês atual (janela rolante).
@@ -38,7 +38,7 @@ function CategoryDonut({ data, total, selected, onSelect }) {
   )
 }
 
-export default function ClientDashboard({ initialExpenses, initialIncome, initialGoals = [], initialBudgets = [], initialCards = [] }) {
+export default function ClientDashboard({ initialExpenses, initialIncome, initialGoals = [], initialGoalTransactions = [], initialBudgets = [], initialCards = [] }) {
   // A data real só é lida no cliente, após montar — assim o HTML do servidor e o
   // primeiro render do cliente são idênticos (sem divergência de hidratação).
   const [today, setToday] = useState(null)
@@ -57,9 +57,10 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [])
 
+  const [expenses, setExpenses] = useState(initialExpenses)
   const metrics = useMemo(
-    () => computeAll(initialExpenses, initialIncome, today, initialCards),
-    [initialExpenses, initialIncome, today, initialCards]
+    () => computeAll(expenses, initialIncome, today, initialCards),
+    [expenses, initialIncome, today, initialCards]
   )
   const currentMetric = metrics[currentMonth]
   const todayDay = today ? today.getDate() : null
@@ -73,42 +74,11 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
   const windowEndIdx = lastWindow.idx
   const lastBalance = lastWindow.balance
   const negativeMonths = windowMetrics.filter(m => m.balance < 0).length
-  const hasData = initialExpenses.length > 0 || initialIncome.length > 0
+  const hasData = expenses.length > 0 || initialIncome.length > 0
 
-  const router = useRouter()
   const supabase = createClient()
-  const [paidBusy, setPaidBusy] = useState(false)
-
-  // ── Metas de economia ──────────────────────────────────────
-  const [goals, setGoals] = useState(initialGoals)
-  const [goalModal, setGoalModal] = useState(false)
-  const [goalForm, setGoalForm] = useState({ name: '', target_amount: '', target_month: '' })
-  const [goalBusy, setGoalBusy] = useState(false)
-  const [goalError, setGoalError] = useState(null)
-
-  const saveGoal = async () => {
-    const amount = Number(goalForm.target_amount)
-    const tMonth = parseInt(goalForm.target_month, 10)
-    if (!goalForm.name.trim()) { setGoalError('Dê um nome pra meta.'); return }
-    if (!isFinite(amount) || amount <= 0) { setGoalError('Valor da meta inválido.'); return }
-    if (isNaN(tMonth)) { setGoalError('Escolha o mês alvo.'); return }
-    setGoalBusy(true)
-    setGoalError(null)
-    const { data: { session } } = await supabase.auth.getSession()
-    const { data, error } = await supabase.from('goals')
-      .insert({ user_id: session?.user?.id, name: goalForm.name.trim(), target_amount: amount, target_month: tMonth })
-      .select().single()
-    setGoalBusy(false)
-    if (error) { setGoalError(error.message); return }
-    setGoals(g => [...g, data].sort((a, b) => a.target_month - b.target_month))
-    setGoalForm({ name: '', target_amount: '', target_month: '' })
-    setGoalModal(false)
-  }
-
-  const deleteGoal = async (id) => {
-    setGoals(g => g.filter(x => x.id !== id))
-    await supabase.from('goals').delete().eq('id', id)
-  }
+  const [paidBusyIds, setPaidBusyIds] = useState(() => new Set())
+  const [payError, setPayError] = useState(null)
 
   // ── Orçamentos por categoria ───────────────────────────────
   const [budgets, setBudgets] = useState(initialBudgets)
@@ -192,18 +162,31 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
   }, [hasData, metrics, realMonth, currentMetric, windowMetrics])
 
   // Marca/desmarca uma despesa como paga no mês visualizado (paid_through).
-  const togglePaid = async (item) => {
-    if (paidBusy || !item.id) return
-    setPaidBusy(true)
-    const newVal = item.isPaid ? (currentMonth > 0 ? currentMonth - 1 : null) : currentMonth
-    // Filtro extra por user_id (além da RLS) — defesa em profundidade.
+  const updatePaid = async (items, markPaid) => {
+    const ids = [...new Set(items.map(item => item.id).filter(Boolean))]
+    if (!ids.length || ids.some(id => paidBusyIds.has(id))) return
+    const previous = new Map(expenses.filter(exp => ids.includes(exp.id)).map(exp => [exp.id, exp.paid_through]))
+    const paidThrough = markPaid ? currentMonth : (currentMonth > 0 ? currentMonth - 1 : null)
+    setPayError(null)
+    setPaidBusyIds(prev => new Set([...prev, ...ids]))
+    setExpenses(prev => prev.map(exp => ids.includes(exp.id) ? { ...exp, paid_through: paidThrough } : exp))
     const { data: { session } } = await supabase.auth.getSession()
-    let q = supabase.from('expenses').update({ paid_through: newVal }).eq('id', item.id)
+    let q = supabase.from('expenses').update({ paid_through: paidThrough }).in('id', ids)
     if (session?.user?.id) q = q.eq('user_id', session.user.id)
-    await q
-    router.refresh()
-    setPaidBusy(false)
+    const { error } = await q
+    if (error) {
+      setExpenses(prev => prev.map(exp => previous.has(exp.id) ? { ...exp, paid_through: previous.get(exp.id) } : exp))
+      setPayError('Não consegui salvar o pagamento. Nada foi alterado; tente novamente.')
+    }
+    setPaidBusyIds(prev => {
+      const next = new Set(prev)
+      ids.forEach(id => next.delete(id))
+      return next
+    })
   }
+
+  const togglePaid = (item) => updatePaid([item], !item.isPaid)
+  const toggleInvoicePaid = (items) => updatePaid(items, !items.every(item => item.isPaid))
 
   const alertIcon = (type) => (type === 'pos' ? <IconCheck size={16} /> : <IconAlert size={16} />)
 
@@ -284,6 +267,15 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
     return out
   }, [metrics, currentMonth, windowMetrics, byCategory])
 
+  const goalSummaries = useMemo(() => {
+    if (!today) return []
+    return initialGoals.map(goal => {
+      const tx = initialGoalTransactions.filter(item => item.goal_id === goal.id)
+      return { goal, analysis: analyzeGoal(goal, tx, today) }
+    })
+  }, [initialGoals, initialGoalTransactions, today])
+  const reservedInGoals = goalSummaries.reduce((sum, item) => sum + item.analysis.current, 0)
+
   return (
     <div className={`page anim ${showDetails ? '' : 'mobile-collapsed'}`}>
       <header className="app-topbar">
@@ -353,6 +345,7 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
             <span className="grana-top-val">{formatCurrency(currentMetric.saldoAtual)}</span>
           </div>
           <span className="grana-top-extras">
+            {reservedInGoals > 0 && <span className="grana-top-sub goals">reservado em metas {formatCurrency(reservedInGoals)}</span>}
             {currentMetric.pendingIn > 0 && <span className="grana-top-sub in">ainda entram {formatCurrency(currentMetric.pendingIn)}</span>}
             {currentMetric.pendingPay > 0
               ? <span className="grana-top-sub">falta pagar {formatCurrency(currentMetric.pendingPay)}</span>
@@ -369,6 +362,9 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
         )}
         {currentMetric.isCurrent && currentMetric.pendingIn > 0 && (
           <div className="ms-item"><span>Ainda entra</span><strong className="ms-pos" style={{ opacity: .8 }}>{formatCurrency(currentMetric.pendingIn)}</strong></div>
+        )}
+        {reservedInGoals > 0 && (
+          <div className="ms-item"><span>Reservado em metas</span><strong className="ms-info">{formatCurrency(reservedInGoals)}</strong></div>
         )}
         <div className="ms-item"><span>Falta pagar</span><strong className="ms-warn">{formatCurrency(currentMetric.pendingPay)}</strong></div>
         <div className="ms-item"><span>Saldo fim do mês</span><strong style={{ color: currentMetric.balance >= 0 ? 'var(--pos)' : 'var(--neg)' }}>{formatCurrency(currentMetric.balance)}</strong></div>
@@ -519,50 +515,36 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
       {hasData && (
         <section className="card goals-card dash-detail">
           <div className="card-header">
-            <span className="timeline-title" style={{ marginBottom: 0 }}>Metas de economia</span>
-            <button className="btn-ghost" onClick={() => { setGoalError(null); setGoalModal(true) }}>+ Nova meta</button>
+            <div>
+              <span className="timeline-title" style={{ marginBottom: 0 }}>Caixinhas e metas</span>
+              <div className="card-header-sub">Dinheiro realmente reservado, separado do saldo projetado.</div>
+            </div>
+            <Link className="btn-ghost" href="/metas">Ver e movimentar</Link>
           </div>
           <div className="card-body">
-            {goals.length === 0 ? (
-              <div className="goals-empty">Nenhuma meta ainda. Ex.: “Juntar R$ 5.000 até Dezembro”.</div>
+            {goalSummaries.length === 0 ? (
+              <div className="goals-empty">Nenhuma caixinha ainda. Crie uma meta para descobrir quanto guardar por mês.</div>
             ) : (
-              <div className="goals-list">
-                {goals.map(g => {
-                  const target = parseFloat(g.target_amount) || 0
-                  const projected = metrics[g.target_month]?.balance ?? 0
-                  const pct = target > 0 ? Math.max(0, Math.min(100, (projected / target) * 100)) : 0
-                  const hit = projected >= target
-                  const late = g.target_month < realMonth
-                  return (
-                    <div key={g.id} className="goal-row">
+              <div className="goals-list dash-goals-list">
+                {goalSummaries.slice(0, 3).map(({ goal, analysis }) => (
+                    <Link key={goal.id} href="/metas" className="goal-row dash-goal-row">
                       <div className="goal-head">
                         <div className="goal-name">
-                          {g.name}
-                          <span className="goal-when">até {metrics[g.target_month]?.monthName || '—'}</span>
-                          {late && <span className="goal-late">mês já passou</span>}
+                          {goal.name}
+                          <span className={`goal-pace ${analysis.onTrack ? 'track' : 'behind'}`}>{analysis.reached ? 'concluída' : analysis.onTrack ? 'no ritmo' : 'ajuste necessário'}</span>
                         </div>
                         <div className="goal-nums">
-                          <strong style={{ color: hit ? 'var(--pos)' : 'var(--text)' }}>{formatCurrency(projected)}</strong>
-                          <span> / {formatCurrency(target)}</span>
-                          <button className="goal-del" onClick={() => deleteGoal(g.id)} title="Excluir meta">✕</button>
+                          <strong>{formatCurrency(analysis.current)}</strong>
+                          <span> / {formatCurrency(analysis.target)}</span>
                         </div>
                       </div>
                       <div className="goal-bar">
-                        <div className={`goal-fill ${hit ? 'hit' : ''}`} style={{ width: `${pct}%` }} />
+                        <div className={`goal-fill ${analysis.reached ? 'hit' : ''}`} style={{ width: `${analysis.progress}%` }} />
                       </div>
-                      {hit ? (
-                        <div className="goal-sub goal-hit">
-                          <IconCheckCircle size={14} filled />
-                          <span>Meta batida na projeção — sobra {formatCurrency(projected - target)}</span>
-                        </div>
-                      ) : (
-                        <div className="goal-sub">
-                          Faltam {formatCurrency(target - projected)} na projeção de {metrics[g.target_month]?.monthName || '—'} ({Math.round(pct)}%)
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
+                      <div className="goal-sub">{analysis.reached ? 'Objetivo alcançado' : analysis.periods > 0 ? `Recomendado: ${formatCurrency(analysis.recommendedMonthly)} por mês` : `Faltam ${formatCurrency(analysis.missing)}`}</div>
+                    </Link>
+                ))}
+                {goalSummaries.length > 3 && <Link href="/metas" className="goals-more">+ {goalSummaries.length - 3} caixinha(s)</Link>}
               </div>
             )}
           </div>
@@ -737,6 +719,8 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
                   const cardItems = currentMetric.expensesList.filter(e => e.cardName === cardName)
                   const cardTotal = cardItems.reduce((acc, curr) => acc + curr.amount, 0)
                   const meta = CARD_META[cardItems[0].cardId] || CARD_META.extra
+                  const invoicePaid = cardItems.every(item => item.isPaid)
+                  const invoiceBusy = cardItems.some(item => paidBusyIds.has(item.id))
 
                   return (
                     <div className="card-group" key={cardName}>
@@ -745,7 +729,13 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
                           <span className={`tag ${meta.tagClass}`}>{meta.name}</span>
                           <span style={{ fontSize: '.68rem', color: 'var(--text2)' }}>Vencimento dia {cardItems[0].payDay}</span>
                         </div>
-                        <span className="hero-negative" style={{ fontSize: '.8rem', fontWeight: 700 }}>{formatCurrency(cardTotal)}</span>
+                        <div className="invoice-group-summary">
+                          <span className="hero-negative">{formatCurrency(cardTotal)}</span>
+                          <button className={`invoice-pay-btn ${invoicePaid ? 'paid' : ''}`} onClick={() => toggleInvoicePaid(cardItems)} disabled={invoiceBusy}>
+                            <span className={`pay-toggle ${invoicePaid ? 'on' : ''}`}>{invoicePaid ? <IconCheck size={13} /> : ''}</span>
+                            {invoiceBusy ? 'Salvando…' : invoicePaid ? 'Fatura paga' : 'Marcar fatura paga'}
+                          </button>
+                        </div>
                       </div>
                       <table className="exp-table">
                         <thead>
@@ -763,7 +753,7 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
                               <td style={{ textAlign: 'center' }}><span className="inst-badge">{item.instStr}</span></td>
                               <td className="amt-col">{formatCurrency(item.amount)}</td>
                               <td style={{ textAlign: 'center' }}>
-                                <button className={`pay-toggle ${item.isPaid ? 'on' : ''}`} onClick={() => togglePaid(item)} disabled={paidBusy} aria-label={item.isPaid ? 'Desmarcar pago' : 'Marcar como pago'} title={item.isPaid ? 'Pago — clique para desmarcar' : 'Marcar como pago'}>
+                                <button className={`pay-toggle ${item.isPaid ? 'on' : ''}`} onClick={() => togglePaid(item)} disabled={paidBusyIds.has(item.id)} aria-label={item.isPaid ? 'Desmarcar pago' : 'Marcar como pago'} title={item.isPaid ? 'Pago — clique para desmarcar' : 'Marcar como pago'}>
                                   {item.isPaid ? <IconCheck size={13} /> : ''}
                                 </button>
                               </td>
@@ -777,6 +767,7 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
                 {currentMetric.expensesList.length === 0 && (
                   <div style={{ textAlign: 'center', color: 'var(--text2)', fontSize: '.8rem', padding: '16px 0' }}>Nenhuma despesa neste mês.</div>
                 )}
+                {payError && <div className="form-hint hint-warn invoice-pay-error">{payError}</div>}
               </div>
             </div>
           </div>
@@ -847,46 +838,6 @@ export default function ClientDashboard({ initialExpenses, initialIncome, initia
         </div>
       </div>
 
-      {/* Modal: nova meta */}
-      <div className={`modal-backdrop ${goalModal ? 'open' : ''}`}>
-        <div className="modal-box" style={{ maxWidth: '420px' }}>
-          <div className="modal-hd">
-            <div style={{ fontWeight: 800, fontSize: '.9rem', color: '#fff' }}>Nova meta de economia</div>
-            <button className="modal-close" onClick={() => setGoalModal(false)}>✕</button>
-          </div>
-          <div className="modal-bd">
-            <div className="form-group">
-              <label className="form-label">Nome da meta</label>
-              <input className="form-input" maxLength={60} value={goalForm.name}
-                onChange={e => setGoalForm({ ...goalForm, name: e.target.value })}
-                placeholder="Ex: Reserva de emergência, Viagem..." />
-            </div>
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">Quero ter (R$)</label>
-                <input className="form-input" type="number" min="0" step="0.01" value={goalForm.target_amount}
-                  onChange={e => setGoalForm({ ...goalForm, target_amount: e.target.value })} placeholder="5000" />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Até quando</label>
-                <select className="form-input" value={goalForm.target_month}
-                  onChange={e => setGoalForm({ ...goalForm, target_month: e.target.value })}>
-                  <option value="">Escolha o mês</option>
-                  {windowMetrics.map(m => <option key={m.idx} value={m.idx}>{m.monthName}</option>)}
-                </select>
-              </div>
-            </div>
-            <p style={{ fontSize: '.75rem', color: 'var(--text2)', lineHeight: 1.5 }}>
-              A meta é comparada com o <strong style={{ color: 'var(--text)' }}>saldo projetado</strong> do mês escolhido.
-            </p>
-            {goalError && <div className="form-hint hint-warn">{goalError}</div>}
-          </div>
-          <div className="modal-ft">
-            <button className="nav-btn" onClick={() => setGoalModal(false)}>Cancelar</button>
-            <button className="btn-ai" onClick={saveGoal} disabled={goalBusy}>{goalBusy ? 'Salvando...' : 'Criar meta'}</button>
-          </div>
-        </div>
-      </div>
     </div>
   )
 }

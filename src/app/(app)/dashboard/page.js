@@ -27,6 +27,11 @@ export default async function DashboardPage() {
     .eq('user_id', user.id)
     .order('target_month', { ascending: true })
 
+  const { data: goalTransactions } = await supabase
+    .from('goal_transactions')
+    .select('*')
+    .eq('user_id', user.id)
+
   // Orçamentos por categoria (tabela criada na migration 0007; se ainda não existir, segue vazio).
   const { data: budgets } = await supabase
     .from('budgets')
@@ -44,6 +49,7 @@ export default async function DashboardPage() {
       initialExpenses={expenses || []}
       initialIncome={extraIncome || []}
       initialGoals={goals || []}
+      initialGoalTransactions={goalTransactions || []}
       initialBudgets={budgets || []}
       initialCards={cards || []}
       userEmail={user.email}

@@ -3,13 +3,13 @@
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase-browser'
-import { IconSparkles, IconStar, IconSend, IconTrash, IconPaperclip, IconClose } from '@/lib/icons'
+import { IconSparkles, IconStar, IconSend, IconTrash, IconPaperclip, IconClose, IconCopy, IconReply } from '@/lib/icons'
 
 const EXAMPLES = [
-  'Quanto eu gasto por mês somando todos os cartões?',
-  'Adicione a fatura da Havan, 120 reais em Maio',
-  'Qual cartão está mais apertado em relação ao limite?',
-  'Se eu atrasar a fatura do Nubank 5 dias, quanto pago de juros?',
+  'Gastei 42 reais no mercado pelo Pix hoje.',
+  'Paguei a fatura inteira do Nubank hoje.',
+  'Onde estou gastando acima do meu orçamento?',
+  'Quanto preciso guardar por mês para minhas metas?',
 ]
 
 const MAX_FILE_MB = 10
@@ -57,11 +57,16 @@ export default function ChatClient({ initialMessages, userId, userName }) {
   const [confirmClear, setConfirmClear] = useState(false)
   const [actionMsg, setActionMsg] = useState(null) // mensagem aberta no menu (segurar/botão direito)
   const [attachment, setAttachment] = useState(null) // { name, mimeType, data(base64) }
+  const [quickReplies, setQuickReplies] = useState([])
+  const [replyTo, setReplyTo] = useState(null)
+  const [swiping, setSwiping] = useState(null)
+  const [copiedId, setCopiedId] = useState(null)
 
   const threadRef = useRef(null)
   const inputRef = useRef(null)
   const fileRef = useRef(null)
   const pressTimer = useRef(null)
+  const swipeRef = useRef(null)
 
   // Lê o arquivo escolhido e guarda em base64 (vai junto da próxima mensagem).
   const onPickFile = (e) => {
@@ -78,6 +83,7 @@ export default function ChatClient({ initialMessages, userId, userName }) {
       return
     }
     setError(null)
+    setQuickReplies([])
     const reader = new FileReader()
     reader.onload = () => {
       const base64 = String(reader.result).split(',')[1] || ''
@@ -97,21 +103,27 @@ export default function ChatClient({ initialMessages, userId, userName }) {
     if (text.length < 2 && attachment) text = 'Organize os lançamentos deste arquivo pra mim.'
     if (text.length < 2 || sending) return
     const attach = attachment
+    const reply = replyTo
     setInput('')
     setAttachment(null)
     setError(null)
-    setPendingUser(attach ? `${text}\n\nAnexo: ${attach.name}` : text)
+    setPendingUser({ text: attach ? `${text}\n\nAnexo: ${attach.name}` : text, reply })
     setSending(true)
     try {
       const res = await fetch('/api/gemini', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userText: text, attachment: attach || undefined }),
+        body: JSON.stringify({ userText: text, attachment: attach || undefined, replyToId: reply?.id || undefined }),
       })
       const result = await res.json()
       if (!res.ok) throw new Error(result.error || 'Erro na IA')
 
-      setMessages(prev => [...prev, result.userMessage, result.assistantMessage].filter(Boolean))
+      const savedUser = result.userMessage && reply && !result.userMessage.reply_preview
+        ? { ...result.userMessage, reply_to_id: reply.id, reply_preview: reply.content.slice(0, 280), reply_role: reply.role }
+        : result.userMessage
+      setMessages(prev => [...prev, savedUser, result.assistantMessage].filter(Boolean))
+      setQuickReplies(Array.isArray(result.quickReplies) ? result.quickReplies : [])
+      setReplyTo(null)
       setPendingUser(null)
       router.refresh() // sincroniza dados (despesas/receitas) que a IA possa ter mudado
     } catch (e) {
@@ -126,7 +138,33 @@ export default function ChatClient({ initialMessages, userId, userName }) {
   const toggleStar = async (msg) => {
     const next = !msg.is_starred
     setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, is_starred: next } : m))
-    await supabase.from('chat_messages').update({ is_starred: next }).eq('id', msg.id)
+    const { error: starError } = await supabase
+      .from('chat_messages')
+      .update({ is_starred: next })
+      .eq('id', msg.id)
+      .eq('user_id', userId)
+
+    if (starError) {
+      setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, is_starred: !next } : m))
+      setError('Não consegui atualizar esta favorita.')
+    }
+  }
+
+  const chooseReply = (msg) => {
+    setReplyTo(msg)
+    setActionMsg(null)
+    setSwiping(null)
+    setTimeout(() => inputRef.current?.focus(), 0)
+  }
+
+  const copyMessage = async (msg) => {
+    try {
+      await navigator.clipboard.writeText(msg.content)
+      setCopiedId(msg.id)
+      setTimeout(() => setCopiedId(null), 1600)
+    } catch {
+      setError('Não consegui copiar esta mensagem.')
+    }
   }
 
   const clearAll = async () => {
@@ -151,6 +189,30 @@ export default function ChatClient({ initialMessages, userId, userName }) {
     if (pressTimer.current) { clearTimeout(pressTimer.current); pressTimer.current = null }
   }
 
+
+  const startGesture = (event, msg) => {
+    try { event.currentTarget.setPointerCapture?.(event.pointerId) } catch { /* alguns navegadores não expõem captura */ }
+    swipeRef.current = { id: msg.id, startX: event.clientX, startY: event.clientY, offset: 0 }
+    startPress(msg)
+  }
+  const moveGesture = (event, msg) => {
+    const gesture = swipeRef.current
+    if (!gesture || gesture.id !== msg.id) return
+    const dx = event.clientX - gesture.startX
+    const dy = event.clientY - gesture.startY
+    if (Math.abs(dx) > 7 || Math.abs(dy) > 7) cancelPress()
+    if (dx >= 0 || Math.abs(dx) < Math.abs(dy)) return
+    gesture.offset = Math.max(-82, dx)
+    setSwiping({ id: msg.id, offset: gesture.offset })
+  }
+  const endGesture = (msg) => {
+    cancelPress()
+    const gesture = swipeRef.current
+    swipeRef.current = null
+    if (gesture?.id === msg.id && gesture.offset <= -54) chooseReply(msg)
+    else setSwiping(null)
+  }
+
   const onKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -158,12 +220,18 @@ export default function ChatClient({ initialMessages, userId, userName }) {
     }
   }
 
+  const onInputChange = (e) => {
+    setInput(e.target.value)
+    e.target.style.height = 'auto'
+    e.target.style.height = `${Math.min(140, Math.max(48, e.target.scrollHeight))}px`
+  }
+
   const shown = filterStarred ? messages.filter(m => m.is_starred) : messages
   const firstName = userName ? userName.split(' ')[0] : null
 
   return (
-    <div className="chat-page">
-      <header className="chat-header">
+    <div className="page legacy-page chat-page anim">
+      <header className="app-topbar chat-header">
         <div className="chat-head-title">
           <div className="chat-head-mark"><IconSparkles size={18} /></div>
           <div>
@@ -177,7 +245,7 @@ export default function ChatClient({ initialMessages, userId, userName }) {
             onClick={() => setFilterStarred(v => !v)}
             title="Mostrar só as mensagens marcadas"
           >
-            <IconStar size={15} filled={filterStarred} /> Marcadas
+            <IconStar size={15} filled={filterStarred} /> Favoritas
           </button>
           {messages.length > 0 && (
             <button className="btn-ghost" onClick={() => setConfirmClear(true)}><IconTrash size={15} /> Limpar</button>
@@ -185,12 +253,12 @@ export default function ChatClient({ initialMessages, userId, userName }) {
         </div>
       </header>
 
-      <div className="chat-thread" ref={threadRef}>
+      <div className="chat-thread" ref={threadRef} aria-live="polite">
         {shown.length === 0 && !pendingUser ? (
           <div className="chat-empty">
             <div className="chat-empty-mark"><IconSparkles size={26} /></div>
             <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: '1rem' }}>
-              {filterStarred ? 'Nenhuma mensagem marcada ainda' : `Olá${firstName ? ', ' + firstName : ''}! Como posso ajudar?`}
+              {filterStarred ? 'Nenhuma mensagem favorita ainda' : `Olá${firstName ? ', ' + firstName : ''}! Como posso ajudar?`}
             </div>
             {!filterStarred && (
               <div className="chat-examples">
@@ -202,22 +270,31 @@ export default function ChatClient({ initialMessages, userId, userName }) {
           </div>
         ) : (
           shown.map((m) => (
-            <div key={m.id} className={`chat-msg ${m.role}`}>
+            <div key={m.id} className={`chat-msg ${m.role} ${swiping?.id === m.id ? 'swiping' : ''}`}>
+              <span className={`chat-swipe-cue ${swiping?.id === m.id && swiping.offset <= -54 ? 'ready' : ''}`} aria-hidden="true"><IconReply size={16} /></span>
               <div
                 className={`chat-bubble ${m.is_starred ? 'starred' : ''}`}
-                onPointerDown={() => startPress(m)}
-                onPointerUp={cancelPress}
-                onPointerLeave={cancelPress}
-                onPointerCancel={cancelPress}
+                style={swiping?.id === m.id ? { transform: `translateX(${swiping.offset}px)` } : undefined}
+                onPointerDown={(event) => startGesture(event, m)}
+                onPointerMove={(event) => moveGesture(event, m)}
+                onPointerUp={() => endGesture(m)}
+                onPointerLeave={() => { cancelPress(); if (swipeRef.current?.id !== m.id) setSwiping(null) }}
+                onPointerCancel={() => { cancelPress(); swipeRef.current = null; setSwiping(null) }}
                 onContextMenu={(e) => { e.preventDefault(); setActionMsg(m) }}
               >
+                {m.reply_preview && (
+                  <div className="chat-quoted-message">
+                    <span>{m.reply_role === 'assistant' ? 'Assistente IA' : 'Você'}</span>
+                    <p>{m.reply_preview}</p>
+                  </div>
+                )}
                 {formatMessage(m.content)}
                 {m.role === 'assistant' && m.model && <div className="chat-meta">via {m.model}</div>}
               </div>
               <button
                 className={`chat-star ${m.is_starred ? 'on' : ''}`}
                 onClick={() => toggleStar(m)}
-                title={m.is_starred ? 'Desmarcar' : 'Marcar mensagem'}
+            title={m.is_starred ? 'Remover dos favoritos' : 'Favoritar mensagem'}
               >
                 <IconStar size={16} filled={m.is_starred} />
               </button>
@@ -227,14 +304,29 @@ export default function ChatClient({ initialMessages, userId, userName }) {
 
         {pendingUser && (
           <div className="chat-msg user">
-            <div className="chat-bubble">{formatMessage(pendingUser)}</div>
+            <div className="chat-bubble">
+              {pendingUser.reply && <div className="chat-quoted-message"><span>{pendingUser.reply.role === 'assistant' ? 'Assistente IA' : 'Você'}</span><p>{pendingUser.reply.content}</p></div>}
+              {formatMessage(pendingUser.text)}
+            </div>
           </div>
         )}
         {sending && <div className="chat-typing">FinDash IA está digitando…</div>}
-        {error && <div className="ai-feedback error" style={{ alignSelf: 'flex-start' }}>Erro: {error}</div>}
+        {!sending && quickReplies.length > 0 && !filterStarred && (
+          <div className="chat-quick-replies" aria-label="Respostas sugeridas">
+            {quickReplies.map(reply => <button key={reply} onClick={() => send(reply)}>{reply}</button>)}
+          </div>
+        )}
+        {error && <div className="ai-feedback error" style={{ alignSelf: 'flex-start' }}>{error}</div>}
       </div>
 
       <div className="chat-input-wrap">
+        {replyTo && (
+          <div className="chat-reply-composer">
+            <span className="chat-reply-icon"><IconReply size={15} /></span>
+            <div><strong>Respondendo a {replyTo.role === 'assistant' ? 'Assistente IA' : 'você'}</strong><p>{replyTo.content}</p></div>
+            <button onClick={() => setReplyTo(null)} aria-label="Cancelar resposta"><IconClose size={14} /></button>
+          </div>
+        )}
         {attachment && (
           <div className="chat-attach-chip">
             <IconPaperclip size={13} />
@@ -253,7 +345,7 @@ export default function ChatClient({ initialMessages, userId, userName }) {
             className="chat-input"
             rows={1}
             value={input}
-            onChange={e => setInput(e.target.value)}
+            onChange={onInputChange}
             onKeyDown={onKeyDown}
             placeholder={attachment ? 'Diga o que fazer com o arquivo (ou só envie)…' : 'Escreva sua mensagem…'}
             disabled={sending}
@@ -288,9 +380,15 @@ export default function ChatClient({ initialMessages, userId, userName }) {
         <div className="msg-sheet-backdrop" onClick={() => setActionMsg(null)}>
           <div className="msg-sheet" onClick={(e) => e.stopPropagation()}>
             <div className="msg-sheet-preview">{actionMsg.content.length > 140 ? actionMsg.content.slice(0, 140) + '…' : actionMsg.content}</div>
+            <button className="msg-sheet-btn" onClick={() => chooseReply(actionMsg)}>
+              <IconReply size={16} /> Responder
+            </button>
+            <button className="msg-sheet-btn" onClick={() => copyMessage(actionMsg)}>
+              <IconCopy size={16} /> {copiedId === actionMsg.id ? 'Mensagem copiada' : 'Copiar mensagem'}
+            </button>
             <button className="msg-sheet-btn" onClick={() => { toggleStar(actionMsg); setActionMsg(null) }}>
               <IconStar size={16} filled={actionMsg.is_starred} />
-              {actionMsg.is_starred ? 'Desmarcar' : 'Marcar para a IA usar de contexto'}
+              {actionMsg.is_starred ? 'Remover dos favoritos' : 'Favoritar mensagem'}
             </button>
             <button className="msg-sheet-btn danger" onClick={() => deleteMsg(actionMsg)}>
               <IconTrash size={16} /> Apagar mensagem

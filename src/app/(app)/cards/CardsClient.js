@@ -8,7 +8,7 @@ import { formatCurrency } from '@/lib/finance-engine'
 import { MONTHS_NAMES } from '@/lib/constants'
 import { DEFAULT_CARDS, cardChipStyle } from '@/lib/cards'
 import { analyzeAllCards } from '@/lib/card-analysis'
-import { IconPlus, IconPencil, IconTrash } from '@/lib/icons'
+import { IconPlus, IconPencil, IconTrash, IconCard, IconChevronRight } from '@/lib/icons'
 
 const EMPTY_FORM = { id: null, name: '', color: '#4d83ff', credit_limit: '', closing_day: '', due_day: '' }
 
@@ -21,6 +21,10 @@ export default function CardsClient({ initialCards, expenses = [], userId, curre
   // Análise no mês atual; editar o limite atualiza a barra na hora.
   const analyzed = useMemo(() => analyzeAllCards(expenses, cards, currentMonthIdx), [expenses, cards, currentMonthIdx])
   const monthLabel = MONTHS_NAMES[currentMonthIdx] || MONTHS_NAMES[0]
+  const totalInvoice = analyzed.reduce((sum, card) => sum + card.analysis.currentInvoice, 0)
+  const totalLimit = cards.reduce((sum, card) => sum + (Number(card.credit_limit) || 0), 0)
+  const availableLimit = Math.max(0, totalLimit - totalInvoice)
+  const totalUtilization = totalLimit > 0 ? Math.min(999, (totalInvoice / totalLimit) * 100) : null
   const [form, setForm] = useState(EMPTY_FORM)
   const [showForm, setShowForm] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(null)
@@ -64,10 +68,16 @@ export default function CardsClient({ initialCards, expenses = [], userId, curre
 
   const save = async () => {
     if (!form.name.trim()) { showToast('Dê um nome ao cartão.', 'error'); return }
+    const limit = form.credit_limit === '' ? null : Number(form.credit_limit)
+    const closing = form.closing_day === '' ? null : Number(form.closing_day)
+    const due = form.due_day === '' ? null : Number(form.due_day)
+    if (limit !== null && (!Number.isFinite(limit) || limit < 0)) { showToast('Informe um limite válido.', 'error'); return }
+    if (closing !== null && (!Number.isInteger(closing) || closing < 1 || closing > 31)) { showToast('O fechamento deve ficar entre os dias 1 e 31.', 'error'); return }
+    if (due !== null && (!Number.isInteger(due) || due < 1 || due > 31)) { showToast('O vencimento deve ficar entre os dias 1 e 31.', 'error'); return }
     setBusy(true)
     try {
       if (form.id) {
-        const { error } = await supabase.from('cards').update(toPayload()).eq('id', form.id)
+        const { error } = await supabase.from('cards').update(toPayload()).eq('id', form.id).eq('user_id', userId)
         if (error) throw error
         showToast('Cartão atualizado.')
       } else {
@@ -88,7 +98,7 @@ export default function CardsClient({ initialCards, expenses = [], userId, curre
   const doDelete = async (id) => {
     setBusy(true)
     try {
-      const { error } = await supabase.from('cards').delete().eq('id', id)
+      const { error } = await supabase.from('cards').delete().eq('id', id).eq('user_id', userId)
       if (error) throw error
       setConfirmDelete(null)
       showToast('Cartão removido.')
@@ -120,14 +130,23 @@ export default function CardsClient({ initialCards, expenses = [], userId, curre
   const dayLabel = (d) => (d || d === 0 ? `dia ${d}` : '—')
 
   return (
-    <div className="cards-page">
-      <header className="app-topbar">
+    <div className="page legacy-page cards-list-page anim">
+      <header className="app-topbar legacy-topbar">
         <div>
           <h1 className="page-title">Cartões</h1>
           <p className="page-sub">Cadastre limite, fechamento e vencimento para liberar a análise por cartão.</p>
         </div>
         <button className="btn-primary" onClick={openNew}><IconPlus size={16} /> Adicionar cartão</button>
       </header>
+
+      {cards.length > 0 && (
+        <section className="legacy-overview" aria-label={`Resumo dos cartões em ${monthLabel}`}>
+          <div className="legacy-kpi primary"><span className="legacy-kpi-icon"><IconCard size={18} /></span><div><span>Faturas em {monthLabel}</span><strong>{formatCurrency(totalInvoice)}</strong></div></div>
+          <div className="legacy-kpi"><span>Limite total</span><strong>{totalLimit ? formatCurrency(totalLimit) : 'Não definido'}</strong><small>{cards.length} cartão(ões)</small></div>
+          <div className="legacy-kpi positive"><span>Limite disponível</span><strong>{totalLimit ? formatCurrency(availableLimit) : '—'}</strong><small>Após as faturas do período</small></div>
+          <div className="legacy-kpi"><span>Uso consolidado</span><strong>{totalUtilization == null ? '—' : `${totalUtilization.toFixed(0)}%`}</strong><small>{totalLimit ? 'Sobre o limite total' : 'Defina os limites'}</small></div>
+        </section>
+      )}
 
       {cards.length === 0 ? (
         <div className="empty-state" style={{ margin: '40px 0' }}>
@@ -151,7 +170,7 @@ export default function CardsClient({ initialCards, expenses = [], userId, curre
               <div key={c.id} className="card-tile" style={{ '--tile-accent': c.color || 'var(--info)' }}>
                 <div className="card-tile-hd">
                   <span className="card-tile-name" style={cardChipStyle(c.color)}>{c.name}</span>
-                  <Link href={`/cards/${c.id}`} className="card-tile-analyze">Ver análise →</Link>
+                  <Link href={`/cards/${c.id}`} className="card-tile-analyze">Ver análise <IconChevronRight size={13} /></Link>
                 </div>
                 <div className="card-tile-rows">
                   <div className="card-tile-row">
